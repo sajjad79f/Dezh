@@ -1,0 +1,9 @@
+[package]
+name = "vpn"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../../contracts" }

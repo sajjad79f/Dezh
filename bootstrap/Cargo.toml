@@ -1,0 +1,22 @@
+[package]
+name = "bootstrap"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../contracts" }
+shared-kernel = { path = "../shared-kernel" }
+
+def = { path = "../core/def" }
+dai = { path = "../core/dai" }
+dkg = { path = "../core/dkg" }
+die = { path = "../core/die" }
+dde = { path = "../core/dde" }
+
+monitoring = { path = "../modules/monitoring" }
+firewall   = { path = "../modules/firewall" }
+vpn         = { path = "../modules/vpn" }
+
+uuid.workspace = true

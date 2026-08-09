@@ -1,0 +1,9 @@
+[package]
+name = "contracts"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true

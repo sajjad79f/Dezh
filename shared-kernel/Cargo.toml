@@ -1,0 +1,12 @@
+[package]
+name = "shared-kernel"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../contracts" }
+
+once_cell.workspace = true
+parking_lot.workspace = true

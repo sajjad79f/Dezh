@@ -1,0 +1,1 @@
+pub type DezhResult<T> = Result<T, crate::error::DezhError>;

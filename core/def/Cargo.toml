@@ -1,0 +1,13 @@
+[package]
+name = "def"
+
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../../contracts" }
+shared-kernel = { path = "../../shared-kernel" }
+
+thiserror.workspace = true

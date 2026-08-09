@@ -1,0 +1,13 @@
+[package]
+name = "monitoring"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../../contracts" }
+def = { path = "../../core/def" }
+dai = { path = "../../core/dai" }
+
+sysinfo = "0.37"

@@ -1,0 +1,12 @@
+[package]
+name = "die"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../../contracts" }
+shared-kernel = { path = "../../shared-kernel" }
+dai = { path = "../dai" }
+uuid.workspace = true
