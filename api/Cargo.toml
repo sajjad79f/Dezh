@@ -8,8 +8,11 @@ license.workspace = true
 [dependencies]
 shared-kernel = { path = "../shared-kernel" }
 contracts = { path = "../contracts" }
+firewall = { path = "../modules/firewall" }
 
 tokio = { workspace = true }
 axum = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
+tower-http = { version = "0.5", features = ["cors"] }

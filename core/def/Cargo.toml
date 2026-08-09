@@ -11,3 +11,4 @@ contracts = { path = "../../contracts" }
 shared-kernel = { path = "../../shared-kernel" }
 
 thiserror.workspace = true
+tracing = "0.1"

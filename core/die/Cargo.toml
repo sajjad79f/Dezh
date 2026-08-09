@@ -9,4 +9,6 @@ license.workspace = true
 contracts = { path = "../../contracts" }
 shared-kernel = { path = "../../shared-kernel" }
 dai = { path = "../dai" }
+
 uuid.workspace = true
+thiserror.workspace = true

@@ -1,12 +1,10 @@
 use dai::DaiService;
 use die::DieService;
 use shared_kernel::prelude::*;
-use std::sync::Arc;
 
 pub struct IntelCommand;
 
 impl Command for IntelCommand {
-
     fn name(&self) -> &'static str {
         "intel"
     }
@@ -20,16 +18,13 @@ impl Command for IntelCommand {
         ctx: &CommandContext,
         args: &[&str],
     ) -> String {
-
-        let Some(die) = ctx.services.resolve::<Arc<DieService>>() else {
+        let Some(die) = ctx.services.resolve::<DieService>() else {
             return "DIE service not available.".to_string();
         };
 
         match args.first().copied() {
-
             Some("analyze") => {
-
-                let Some(dai) = ctx.services.resolve::<Arc<DaiService>>() else {
+                let Some(dai) = ctx.services.resolve::<DaiService>() else {
                     return "DAI service not available.".to_string();
                 };
 
@@ -38,18 +33,18 @@ impl Command for IntelCommand {
                 if findings.is_empty() {
                     "Analysis complete. No new findings.".to_string()
                 } else {
-                    let mut lines = vec![format!("Analysis complete. {} finding(s):", findings.len())];
+                    let mut lines =
+                        vec![format!("Analysis complete. {} finding(s):", findings.len())];
 
-                    lines.extend(
-                        findings.iter().map(|f| format!("  [{:?}] {} ({})", f.severity, f.message, f.subject)),
-                    );
+                    lines.extend(findings.iter().map(|f| {
+                        format!("  [{:?}] {} ({})", f.severity, f.message, f.subject)
+                    }));
 
                     lines.join("\n")
                 }
             }
 
             Some("list") => {
-
                 let findings = die.list_findings();
 
                 if findings.is_empty() {
@@ -57,7 +52,12 @@ impl Command for IntelCommand {
                 } else {
                     findings
                         .iter()
-                        .map(|f| format!("{} | [{:?}] {} ({})", f.id, f.severity, f.message, f.subject))
+                        .map(|f| {
+                            format!(
+                                "{} | [{:?}] {} ({})",
+                                f.id, f.severity, f.message, f.subject
+                            )
+                        })
                         .collect::<Vec<_>>()
                         .join("\n")
                 }

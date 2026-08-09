@@ -2,6 +2,12 @@ use contracts::{Module, ModuleDescriptor};
 
 pub struct FirewallModule;
 
+impl FirewallModule {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 impl Module for FirewallModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {

@@ -7,5 +7,5 @@ license.workspace = true
 
 [dependencies]
 contracts = { path = "../../contracts" }
-
+uuid.workspace = true
 thiserror.workspace = true

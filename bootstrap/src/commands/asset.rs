@@ -1,11 +1,9 @@
 use dai::{AssetType, DaiService};
 use shared_kernel::prelude::*;
-use std::sync::Arc;
 
 pub struct AssetCommand;
 
 impl Command for AssetCommand {
-
     fn name(&self) -> &'static str {
         "asset"
     }
@@ -19,31 +17,23 @@ impl Command for AssetCommand {
         ctx: &CommandContext,
         args: &[&str],
     ) -> String {
-
-        let Some(dai) = ctx.services.resolve::<Arc<DaiService>>() else {
+        let Some(dai) = ctx.services.resolve::<DaiService>() else {
             return "DAI service not available.".to_string();
         };
 
         match args.first().copied() {
-
             Some("list") => {
-
                 let assets = dai.list_assets();
 
                 if assets.is_empty() {
-
                     "No assets registered.".to_string()
                 } else {
-
                     assets
                         .iter()
                         .map(|a| {
                             format!(
                                 "{} | {} | {:?} | {:?}",
-                                a.id,
-                                a.name,
-                                a.asset_type,
-                                a.status,
+                                a.id, a.name, a.asset_type, a.status,
                             )
                         })
                         .collect::<Vec<_>>()
@@ -52,9 +42,7 @@ impl Command for AssetCommand {
             }
 
             Some("add") => {
-
                 if args.len() < 3 {
-
                     return "Usage: asset add <name> <type>".to_string();
                 }
 
@@ -70,9 +58,10 @@ impl Command for AssetCommand {
                     other => AssetType::Other(other.to_string()),
                 };
 
-                let id = dai.register_asset(name, asset_type);
-
-                format!("Asset registered with id {id}")
+                match dai.register_asset(name, asset_type) {
+                    Ok(id) => format!("Asset registered with id {id}"),
+                    Err(err) => format!("Error: {err}"),
+                }
             }
 
             _ => "Usage: asset list | asset add <name> <type>".to_string(),

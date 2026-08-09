@@ -1,12 +1,10 @@
 use dkg::DkgService;
 use shared_kernel::prelude::*;
 use uuid::Uuid;
-use std::sync::Arc;
 
 pub struct GraphCommand;
 
 impl Command for GraphCommand {
-
     fn name(&self) -> &'static str {
         "graph"
     }
@@ -20,28 +18,25 @@ impl Command for GraphCommand {
         ctx: &CommandContext,
         args: &[&str],
     ) -> String {
-
-        let Some(dkg) = ctx.services.resolve::<Arc<DkgService>>() else {
+        let Some(dkg) = ctx.services.resolve::<DkgService>() else {
             return "DKG service not available.".to_string();
         };
 
         match args.first().copied() {
-
             Some("node") => {
-
                 if args.len() < 2 {
                     return "Usage: graph node <label>".to_string();
                 }
 
                 let id = Uuid::new_v4();
 
-                dkg.add_node(id, args[1]);
-
-                format!("Node '{}' created with id {id}", args[1])
+                match dkg.add_node(id, args[1]) {
+                    Ok(()) => format!("Node '{}' created with id {id}", args[1]),
+                    Err(err) => format!("Error: {err}"),
+                }
             }
 
             Some("edge") => {
-
                 if args.len() < 4 {
                     return "Usage: graph edge <from> <to> <relation>".to_string();
                 }
@@ -53,13 +48,13 @@ impl Command for GraphCommand {
                     return "Invalid node id(s). Use ids returned by 'graph node'.".to_string();
                 };
 
-                let id = dkg.add_edge(from, to, args[3]);
-
-                format!("Edge '{}' created with id {id}", args[3])
+                match dkg.add_edge(from, to, args[3]) {
+                    Ok(id) => format!("Edge '{}' created with id {id}", args[3]),
+                    Err(err) => format!("Error: {err}"),
+                }
             }
 
             Some("list") => {
-
                 let nodes = dkg.list_nodes();
                 let edges = dkg.list_edges();
 
@@ -72,14 +67,15 @@ impl Command for GraphCommand {
                 lines.push(format!("Edges ({}):", edges.len()));
 
                 lines.extend(
-                    edges.iter().map(|e| format!("  {} -[{}]-> {}", e.from, e.relation, e.to)),
+                    edges
+                        .iter()
+                        .map(|e| format!("  {} -[{}]-> {}", e.from, e.relation, e.to)),
                 );
 
                 lines.join("\n")
             }
 
             Some("neighbors") => {
-
                 if args.len() < 2 {
                     return "Usage: graph neighbors <id>".to_string();
                 }
@@ -108,7 +104,10 @@ impl Command for GraphCommand {
                 }
             }
 
-            _ => "Usage: graph node <label> | graph edge <from> <to> <relation> | graph list | graph neighbors <id>".to_string(),
+            _ => {
+                "Usage: graph node <label> | graph edge <from> <to> <relation> | graph list | graph neighbors <id>"
+                    .to_string()
+            }
         }
     }
 }

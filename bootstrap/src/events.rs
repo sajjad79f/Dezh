@@ -1,16 +1,20 @@
-use crate::handles::CoreServiceHandles;
-use crate::handlers::MonitoringHeartbeatHandler;
+use shared_kernel::prelude::*;
+
+use def::DefService;
 
 pub fn register(
-    handles: &CoreServiceHandles,
+
+    services: &ServiceContainer,
+
 ) {
 
-    handles.def.subscribe(
-        "monitoring.heartbeat",
-        MonitoringHeartbeatHandler {
-            dai: handles.dai.clone(),
-            die: handles.die.clone(),
-            dde: handles.dde.clone(),
-        },
-    );
+    let def =
+
+        services
+
+            .resolve::<DefService>()
+
+            .expect("DEF service not registered");
+
+    crate::handles::register(def);
 }

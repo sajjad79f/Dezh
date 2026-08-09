@@ -1,5 +1,10 @@
-use crate::Event;
+use crate::{Event, DezhResult};
 
 pub trait EventHandler: Send + Sync {
-    fn handle(&self, event: &Event);
+    /// نام یکتای handler برای telemetry و لاگ
+    fn name(&self) -> &'static str {
+        "anonymous"
+    }
+
+    fn handle(&self, event: &Event) -> DezhResult<()>;
 }

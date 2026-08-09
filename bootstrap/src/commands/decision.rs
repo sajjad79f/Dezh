@@ -1,12 +1,10 @@
 use dde::{AutonomyLevel, DdeService};
 use shared_kernel::prelude::*;
 use uuid::Uuid;
-use std::sync::Arc;
 
 pub struct DecisionCommand;
 
 impl Command for DecisionCommand {
-
     fn name(&self) -> &'static str {
         "decision"
     }
@@ -20,15 +18,12 @@ impl Command for DecisionCommand {
         ctx: &CommandContext,
         args: &[&str],
     ) -> String {
-
-        let Some(dde) = ctx.services.resolve::<Arc<DdeService>>() else {
+        let Some(dde) = ctx.services.resolve::<DdeService>() else {
             return "DDE service not available.".to_string();
         };
 
         match args.first().copied() {
-
             Some("submit") => {
-
                 if args.len() < 4 {
                     return "Usage: decision submit <subject-id> <critical|high|low> <description...>".to_string();
                 }
@@ -46,13 +41,13 @@ impl Command for DecisionCommand {
 
                 let description = args[3..].join(" ");
 
-                let id = dde.submit_decision(subject, description, autonomy);
-
-                format!("Decision {id} submitted with autonomy {:?}.", autonomy)
+                match dde.submit_decision(subject, description, autonomy) {
+                    Ok(id) => format!("Decision {id} submitted with autonomy {:?}.", autonomy),
+                    Err(err) => format!("Error: {err}"),
+                }
             }
 
             Some("approve") => {
-
                 let Some(id_str) = args.get(1) else {
                     return "Usage: decision approve <id>".to_string();
                 };
@@ -61,15 +56,13 @@ impl Command for DecisionCommand {
                     return "Invalid decision id.".to_string();
                 };
 
-                if dde.approve(id) {
-                    format!("Decision {id} approved.")
-                } else {
-                    "No pending decision with that id.".to_string()
+                match dde.approve(id) {
+                    Ok(()) => format!("Decision {id} approved."),
+                    Err(err) => format!("Error: {err}"),
                 }
             }
 
             Some("reject") => {
-
                 let Some(id_str) = args.get(1) else {
                     return "Usage: decision reject <id>".to_string();
                 };
@@ -78,15 +71,13 @@ impl Command for DecisionCommand {
                     return "Invalid decision id.".to_string();
                 };
 
-                if dde.reject(id) {
-                    format!("Decision {id} rejected.")
-                } else {
-                    "No pending decision with that id.".to_string()
+                match dde.reject(id) {
+                    Ok(()) => format!("Decision {id} rejected."),
+                    Err(err) => format!("Error: {err}"),
                 }
             }
 
             Some("list") => {
-
                 let decisions = dde.list_decisions();
 
                 if decisions.is_empty() {
@@ -105,7 +96,10 @@ impl Command for DecisionCommand {
                 }
             }
 
-            _ => "Usage: decision submit <subject-id> <critical|high|low> <description...> | decision approve <id> | decision reject <id> | decision list".to_string(),
+            _ => {
+                "Usage: decision submit <subject-id> <critical|high|low> <description...> | decision approve <id> | decision reject <id> | decision list"
+                    .to_string()
+            }
         }
     }
 }

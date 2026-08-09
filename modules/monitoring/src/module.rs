@@ -16,10 +16,7 @@ pub struct MonitoringModule {
 }
 
 impl MonitoringModule {
-    pub fn new(
-        def: Arc<DefService>,
-        dai: Arc<DaiService>,
-    ) -> Self {
+    pub fn new(def: Arc<DefService>, dai: Arc<DaiService>) -> Self {
         Self { def, dai }
     }
 }
@@ -53,12 +50,17 @@ impl Module for MonitoringModule {
 
             let asset_id = match existing {
                 Some(asset) => asset.id,
-                None => dai.register_asset(info.hostname.clone(), AssetType::Server),
+                None => dai
+                    .register_asset(info.hostname.clone(), AssetType::Server)
+                    .expect("failed to register asset"),
             };
 
-            dai.set_status(asset_id, AssetStatus::Active);
+            let _ = dai.set_status(asset_id, AssetStatus::Active);
 
-            def.publish(Event::new("monitoring.heartbeat", info.hostname));
+            let _ = def.publish(Event::simple(
+                "monitoring.heartbeat",
+                info.hostname,
+            ));
 
             thread::sleep(HEARTBEAT_INTERVAL);
         });

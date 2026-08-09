@@ -35,3 +35,34 @@ pub struct ExecuteCommandResponse {
 pub struct ErrorDto {
     pub error: String,
 }
+
+#[derive(Serialize)]
+pub struct FirewallRuleDto {
+    pub id: String,
+    pub name: String,
+    pub action: String,
+    pub direction: String,
+    pub protocol: String,
+    pub source: String,
+    pub destination: String,
+    pub port: Option<u16>,
+    pub enabled: bool,
+    pub priority: u32,
+}
+
+#[derive(Deserialize)]
+pub struct CreateFirewallRuleRequest {
+    pub name: String,
+    pub action: String,
+    pub direction: String,
+    pub protocol: String,
+    pub source: String,
+    pub destination: String,
+    pub port: Option<u16>,
+    #[serde(default = "default_priority")]
+    pub priority: u32,
+}
+
+fn default_priority() -> u32 {
+    100
+}

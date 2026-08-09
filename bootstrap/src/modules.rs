@@ -1,27 +1,30 @@
 use std::sync::Arc;
 
-use firewall::{FirewallModule, FirewallService};
-use monitoring::MonitoringModule;
-use vpn::VpnModule;
-
 use shared_kernel::prelude::*;
+use def::DefService;
+use dai::DaiService;
 
-use crate::handles::CoreServiceHandles;
+use firewall::FirewallModule;
+use monitoring::MonitoringModule;
 
 pub fn register(
-    registry: &mut ModuleRegistry,
-    services: &mut ServiceContainer,
-    handles: &CoreServiceHandles,
+    services: &ServiceContainer,
+    modules: &mut ModuleRegistry,
 ) {
-    registry.register(MonitoringModule::new(
-        handles.def.clone(),
-        handles.dai.clone(),
+    let def = services
+        .resolve::<DefService>()
+        .expect("DEF service not registered")
+        .clone();
+
+    let dai = services
+        .resolve::<DaiService>()
+        .expect("DAI service not registered")
+        .clone();
+
+    modules.register(FirewallModule::new());
+
+    modules.register(MonitoringModule::new(
+        Arc::new(def),
+        Arc::new(dai),
     ));
-
-    let firewall_service = Arc::new(FirewallService::new());
-    services.register(firewall_service);
-
-    registry.register(FirewallModule);
-
-    registry.register(VpnModule);
 }

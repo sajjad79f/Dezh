@@ -8,4 +8,6 @@ license.workspace = true
 [dependencies]
 contracts = { path = "../../contracts" }
 shared-kernel = { path = "../../shared-kernel" }
+
 uuid.workspace = true
+thiserror.workspace = true

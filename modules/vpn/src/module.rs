@@ -2,6 +2,12 @@ use contracts::{Module, ModuleDescriptor};
 
 pub struct VpnModule;
 
+impl VpnModule {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 impl Module for VpnModule {
     fn descriptor(&self) -> ModuleDescriptor {
         ModuleDescriptor {

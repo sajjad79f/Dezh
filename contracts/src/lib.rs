@@ -8,7 +8,7 @@ pub mod core_service;
 
 pub use core_service::CoreService;
 pub use error::DezhError;
-pub use event::{Event, EventHandler};
+pub use event::{Event, EventHandler, EventSource, Topic, Severity, EventId, CorrelationId};
 pub use logger::Logger;
 pub use module::{Module, ModuleDescriptor};
 pub use result::DezhResult;
