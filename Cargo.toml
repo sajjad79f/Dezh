@@ -16,6 +16,7 @@ members = [
 
     "dcm",
     "api",
+    "storage",
 
     "modules/monitoring",
     "modules/firewall",

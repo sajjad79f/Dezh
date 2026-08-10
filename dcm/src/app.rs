@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bootstrap::bootstrap;
 use shared_kernel::prelude::*;
 
+use storage::{bootstrap_admin, create_pool, DatabaseConfig};
 const WEB_CONSOLE_ADDR: &str = "127.0.0.1:7878";
 
 pub struct Application {
@@ -52,6 +53,21 @@ impl Application {
             commands: commands.clone(),
             services: services.clone(),
         };
+
+        let db_config = DatabaseConfig::from_env();
+        match create_pool(&db_config).await {
+            Ok(pool) => {
+                if let Err(e) = bootstrap_admin(&pool).await {
+                    eprintln!("[dcm] bootstrap admin failed: {e}");
+                }
+                // فعلاً pool را نگه دار — فاز بعد در ServiceContainer
+                // services.register(pool);  // اگر TypeId/Arc لازم شد بعداً
+                let _pool = pool;
+            }
+            Err(e) => {
+                eprintln!("[dcm] database unavailable: {e} — continuing without persistence");
+            }
+        }
 
         let web_handle = tokio::spawn(async move {
             if let Err(err) = api::serve(state, WEB_CONSOLE_ADDR).await {

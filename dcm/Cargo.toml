@@ -11,5 +11,6 @@ contracts = { path = "../contracts" }
 
 bootstrap = { path = "../bootstrap" }
 api = { path = "../api" }
+storage = { path = "../storage" }
 
 tokio = { workspace = true }
