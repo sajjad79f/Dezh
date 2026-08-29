@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use bootstrap::bootstrap;
 use shared_kernel::prelude::*;
-
 use storage::{bootstrap_admin, create_pool, DatabaseConfig};
-const WEB_CONSOLE_ADDR: &str = "127.0.0.1:7878";
+
+const WEB_CONSOLE_ADDR: &str = "0.0.0.0:7878";
 
 pub struct Application {
     services: ServiceContainer,
@@ -21,7 +21,7 @@ impl Application {
         }
     }
 
-    fn bootstrap(&mut self) {
+    fn bootstrap_app(&mut self) {
         bootstrap(
             &mut self.services,
             &mut self.modules,
@@ -30,23 +30,34 @@ impl Application {
     }
 
     pub async fn run(mut self) {
-        self.bootstrap();
+        let db_config = DatabaseConfig::from_env();
+        match create_pool(&db_config).await {
+            Ok(pool) => {
+                eprintln!("[dcm] database connected");
+                if let Err(e) = bootstrap_admin(&pool).await {
+                    eprintln!("[dcm] bootstrap admin failed: {e}");
+                }
+                self.services.register(pool);
+            }
+            Err(e) => {
+                eprintln!("[dcm] database unavailable: {e}");
+            }
+        }
 
-        // Modules, commands, and services are only mutated during
-        // bootstrap (above). From here on they are read-only, so it is
-        // safe to share them between the blocking CLI shell thread and
-        // the async Web Console through a plain Arc.
+        self.bootstrap_app();
+
+        if let Some(pool) = self.services.resolve::<storage::DbPool>() {
+            if let Some(fw) = self.services.resolve::<firewall::FirewallService>() {
+                fw.attach_pool((*pool).clone());
+            }
+            if let Some(dai) = self.services.resolve::<dai::DaiService>() {
+                dai.attach_pool((*pool).clone());
+            }
+        }
+
         let modules = Arc::new(self.modules);
         let commands = Arc::new(self.commands);
         let services = Arc::new(self.services);
-
-        let shell_modules = modules.clone();
-        let shell_commands = commands.clone();
-        let shell_services = services.clone();
-
-        let shell_handle = tokio::task::spawn_blocking(move || {
-            crate::shell::run(&shell_modules, &shell_commands, &shell_services);
-        });
 
         let state = api::AppState {
             modules: modules.clone(),
@@ -54,30 +65,30 @@ impl Application {
             services: services.clone(),
         };
 
-        let db_config = DatabaseConfig::from_env();
-        match create_pool(&db_config).await {
-            Ok(pool) => {
-                if let Err(e) = bootstrap_admin(&pool).await {
-                    eprintln!("[dcm] bootstrap admin failed: {e}");
-                }
-                // فعلاً pool را نگه دار — فاز بعد در ServiceContainer
-                // services.register(pool);  // اگر TypeId/Arc لازم شد بعداً
-                let _pool = pool;
-            }
-            Err(e) => {
-                eprintln!("[dcm] database unavailable: {e} — continuing without persistence");
-            }
-        }
-
         let web_handle = tokio::spawn(async move {
             if let Err(err) = api::serve(state, WEB_CONSOLE_ADDR).await {
                 eprintln!("Web Console error: {err}");
             }
         });
 
-        // The process exits once the interactive shell exits (e.g. "exit").
-        let _ = shell_handle.await;
-        modules.stop_all();
-        web_handle.abort();
+        let stdin_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdin());
+
+        if stdin_is_tty {
+            let shell_modules = modules.clone();
+            let shell_commands = commands.clone();
+            let shell_services = services.clone();
+
+            let shell_handle = tokio::task::spawn_blocking(move || {
+                crate::shell::run(&shell_modules, &shell_commands, &shell_services);
+            });
+
+            let _ = shell_handle.await;
+            modules.stop_all();
+            web_handle.abort();
+        } else {
+            eprintln!("[dcm] no TTY — interactive shell disabled (service mode)");
+            let _ = web_handle.await;
+            modules.stop_all();
+        }
     }
 }

@@ -66,3 +66,111 @@ pub struct CreateFirewallRuleRequest {
 fn default_priority() -> u32 {
     100
 }
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Serialize)]
+pub struct LoginResponse {
+    pub token: String,
+    pub username: String,
+    pub role: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct MeResponse {
+    pub id: String,
+    pub username: String,
+    pub role: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct UserDto {
+    pub id: String,
+    pub username: String,
+    pub role: String,
+    pub display_name: Option<String>,
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct CreateUserRequest {
+    pub username: String,
+    pub password: String,
+    pub role: String,
+    pub display_name: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct IdentityDto {
+    pub id: String,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub source: String,
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct CreateIdentityRequest {
+    pub username: String,
+    pub display_name: Option<String>,
+    #[serde(default = "default_source")]
+    pub source: String,
+}
+
+fn default_source() -> String {
+    "local".into()
+}
+
+#[derive(Serialize)]
+pub struct AccountingSessionDto {
+    pub id: String,
+    pub identity_id: Option<String>,
+    pub protocol: String,
+    pub ip_address: Option<String>,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub bytes_in: i64,
+    pub bytes_out: i64,
+}
+
+#[derive(Deserialize)]
+pub struct StartSessionRequest {
+    pub identity_id: Option<String>,
+    pub protocol: String, // vpn | nac | portal | other
+    pub ip_address: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct EndSessionRequest {
+    pub session_id: String,
+    #[serde(default)]
+    pub bytes_in: i64,
+    #[serde(default)]
+    pub bytes_out: i64,
+    pub terminate_cause: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct AgentUserActiveRequest {
+    pub username: String,
+    pub hostname: Option<String>,
+    pub ip_address: Option<String>,
+    pub os: Option<String>,
+    pub agent_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct AgentUserInactiveRequest {
+    pub username: String,
+    pub ip_address: Option<String>,
+    #[serde(default)]
+    pub bytes_in: i64,
+    #[serde(default)]
+    pub bytes_out: i64,
+}

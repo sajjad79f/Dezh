@@ -5,4 +5,10 @@ version.workspace = true
 authors.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "linux-agent"
+path = "src/main.rs"
+
 [dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

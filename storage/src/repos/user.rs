@@ -57,8 +57,8 @@ impl<'a> UserRepo<'a> {
 
         sqlx::query(
             r#"
-            INSERT INTO users (id, username, password_hash, display_name, role)
-            VALUES ($1, $2, $3, $4, $5)
+            INSERT INTO users (id, username, password_hash, display_name, role, enabled)
+            VALUES ($1, $2, $3, $4, $5, TRUE)
             "#,
         )
         .bind(id)
@@ -76,7 +76,8 @@ impl<'a> UserRepo<'a> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
             SELECT id, username, password_hash, display_name, role, enabled
-            FROM users WHERE username = $1
+            FROM users
+            WHERE username = $1
             "#,
         )
         .bind(username)
@@ -85,37 +86,39 @@ impl<'a> UserRepo<'a> {
         Ok(row)
     }
 
-    pub async fn list(&self) -> StorageResult<Vec<UserRow>> {
-        let rows = sqlx::query_as::<_, UserRow>(
-            r#"
-            SELECT id, username, password_hash, display_name, role, enabled
-            FROM users ORDER BY username
-            "#,
-        )
-        .fetch_all(self.pool)
-        .await?;
-        Ok(rows)
-    }
-
     pub async fn count(&self) -> StorageResult<i64> {
-        let (n,): (i64,) = sqlx::query_as(r#"SELECT COUNT(*) FROM users"#)
+        let (n,): (i64,) = sqlx::query_as(r#"SELECT COUNT(*)::bigint FROM users"#)
             .fetch_one(self.pool)
             .await?;
         Ok(n)
     }
 
-    /// اگر هیچ کاربری نباشد، admin اولیه می‌سازد
+    /// اگر هیچ کاربری نباشد، admin می‌سازد
     pub async fn ensure_bootstrap_admin(
         &self,
         username: &str,
         password: &str,
     ) -> StorageResult<Option<Uuid>> {
-        if self.count().await? > 0 {
+        let n = self.count().await?;
+        eprintln!("[storage] users count = {n}");
+        if n > 0 {
             return Ok(None);
         }
         let id = self
             .create(username, password, Some("Administrator"), "admin")
             .await?;
         Ok(Some(id))
+    }
+    pub async fn list(&self) -> StorageResult<Vec<UserRow>> {
+        let rows = sqlx::query_as::<_, UserRow>(
+            r#"
+            SELECT id, username, password_hash, display_name, role, enabled
+            FROM users
+            ORDER BY username
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows)
     }
 }

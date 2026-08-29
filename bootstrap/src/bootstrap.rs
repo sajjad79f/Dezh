@@ -12,4 +12,7 @@ pub fn bootstrap(
     crate::events::register(services);
 
     crate::commands::register(commands);   // ← فقط این آرگومان
+
+    modules.initialize_all();
+    modules.start_all();
 }

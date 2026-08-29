@@ -88,4 +88,16 @@ impl AssetRegistry {
             .find(|a| a.name == name)
             .cloned()
     }
+
+    pub fn insert_existing(&self, asset: Asset) {
+        let mut guard = self.assets.write().expect("DAI registry lock poisoned");
+        guard.insert(asset.id, asset);
+    }
+
+    pub fn clear(&self) {
+        self.assets
+            .write()
+            .expect("DAI registry lock poisoned")
+            .clear();
+    }
 }

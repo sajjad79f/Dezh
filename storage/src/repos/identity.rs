@@ -138,6 +138,53 @@ impl<'a> AccountingRepo<'a> {
         Ok(())
     }
 
+    pub async fn end_open_sessions_for_identity(
+        &self,
+        identity_id: Uuid,
+        bytes_in: i64,
+        bytes_out: i64,
+        cause: Option<&str>,
+    ) -> StorageResult<u64> {
+        let result = sqlx::query(
+            r#"
+            UPDATE accounting_sessions
+            SET ended_at = NOW(),
+                bytes_in = $2,
+                bytes_out = $3,
+                terminate_cause = $4
+            WHERE identity_id = $1 AND ended_at IS NULL
+            "#,
+        )
+        .bind(identity_id)
+        .bind(bytes_in)
+        .bind(bytes_out)
+        .bind(cause)
+        .execute(self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
+    pub async fn find_open_session(
+        &self,
+        identity_id: Uuid,
+        protocol: &str,
+    ) -> StorageResult<Option<Uuid>> {
+        let row: Option<(Uuid,)> = sqlx::query_as(
+            r#"
+            SELECT id FROM accounting_sessions
+            WHERE identity_id = $1 AND protocol = $2 AND ended_at IS NULL
+            ORDER BY started_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(identity_id)
+        .bind(protocol)
+        .fetch_optional(self.pool)
+        .await?;
+
+        Ok(row.map(|(id,)| id))
+    }
+
     pub async fn list_active(&self) -> StorageResult<Vec<AccountingSessionRow>> {
         let rows = sqlx::query_as::<_, AccountingSessionRow>(
             r#"

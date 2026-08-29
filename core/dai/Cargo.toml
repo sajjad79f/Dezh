@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 contracts = { path = "../../contracts" }
 shared-kernel = { path = "../../shared-kernel" }
+storage = { path = "../../storage" }
 
+tokio = { workspace = true }
 uuid.workspace = true
 thiserror.workspace = true

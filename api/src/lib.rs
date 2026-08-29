@@ -2,6 +2,7 @@ mod console;
 mod dto;
 mod handlers;
 mod state;
+mod auth;
 
 pub use state::AppState;
 
@@ -30,6 +31,29 @@ pub fn router(state: AppState) -> Router {
             "/api/firewall/rules/{id}",
             delete(handlers::delete_firewall_rule),
         )
+        .route("/api/auth/login", post(handlers::login))
+        .route("/api/auth/logout", post(handlers::logout))
+        .route("/api/auth/me", get(handlers::me))
+        .route("/api/users", get(handlers::list_users).post(handlers::create_user))
+        .route(
+            "/api/identities",
+            get(handlers::list_identities).post(handlers::create_identity),
+        )
+        .route(
+            "/api/accounting/sessions",
+            get(handlers::list_active_sessions),
+        )
+        .route(
+            "/api/accounting/sessions/start",
+            post(handlers::start_session),
+        )
+        .route(
+            "/api/accounting/sessions/end",
+            post(handlers::end_session),
+        )
+        .route("/api/agent/user-active", post(handlers::agent_user_active))
+        .route("/api/agent/user-inactive", post(handlers::agent_user_inactive))
+
         .layer(cors)
         .with_state(state)
 }

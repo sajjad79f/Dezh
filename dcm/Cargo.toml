@@ -8,9 +8,10 @@ license.workspace = true
 [dependencies]
 shared-kernel = { path = "../shared-kernel" }
 contracts = { path = "../contracts" }
-
 bootstrap = { path = "../bootstrap" }
 api = { path = "../api" }
 storage = { path = "../storage" }
+firewall = { path = "../modules/firewall" }
+dai = { path = "../core/dai" }
 
 tokio = { workspace = true }

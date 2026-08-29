@@ -1,20 +1,26 @@
 use shared_kernel::prelude::*;
 
+use dai::DaiService;
+use dde::DdeService;
 use def::DefService;
+use die::DieService;
 
-pub fn register(
+pub fn register(services: &ServiceContainer) {
+    let def = services
+        .resolve::<DefService>()
+        .expect("DEF service not registered");
 
-    services: &ServiceContainer,
+    let dai = services
+        .resolve::<DaiService>()
+        .expect("DAI service not registered");
 
-) {
+    let die = services
+        .resolve::<DieService>()
+        .expect("DIE service not registered");
 
-    let def =
+    let dde = services
+        .resolve::<DdeService>()
+        .expect("DDE service not registered");
 
-        services
-
-            .resolve::<DefService>()
-
-            .expect("DEF service not registered");
-
-    crate::handles::register(def);
+    crate::handles::register(def, dai, die, dde);
 }
