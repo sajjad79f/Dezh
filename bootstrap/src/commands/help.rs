@@ -40,6 +40,8 @@ impl Command for HelpCommand {
             " firewall list",
             " firewall block <ip>",
             " firewall unblock <ip>",
+            " iface list",
+            " iface zone <name> <lan|wan|dmz>",
             " exit",
         ].join("\n")
     }

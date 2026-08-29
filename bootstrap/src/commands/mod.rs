@@ -3,6 +3,7 @@ pub mod decision;
 pub mod firewall;
 pub mod graph;
 pub mod help;
+pub mod iface;
 pub mod intel;
 pub mod system;
 
@@ -13,6 +14,7 @@ use decision::DecisionCommand;
 use firewall::FirewallCommand;
 use graph::GraphCommand;
 use help::HelpCommand;
+use iface::IfaceCommand;
 use intel::IntelCommand;
 use system::SystemCommand;
 
@@ -26,4 +28,5 @@ pub fn register(
     commands.register(IntelCommand);
     commands.register(DecisionCommand);
     commands.register(FirewallCommand);
+    commands.register(IfaceCommand);
 }
