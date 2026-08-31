@@ -8,8 +8,11 @@ license.workspace = true
 [dependencies]
 shared-kernel = { path = "../shared-kernel" }
 contracts = { path = "../contracts" }
-firewall = { path = "../modules/firewall" }
 storage = { path = "../storage" }
+
+firewall = { path = "../modules/firewall" }
+routing = { path = "../modules/routing" }
+accounting = { path = "../modules/accounting" }
 
 tokio = { workspace = true }
 axum = { workspace = true }

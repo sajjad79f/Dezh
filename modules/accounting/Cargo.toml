@@ -1,0 +1,15 @@
+[package]
+name = "accounting"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+contracts = { path = "../../contracts" }
+storage = { path = "../../storage" }
+firewall = { path = "../firewall" }
+
+uuid = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }

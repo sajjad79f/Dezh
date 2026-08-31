@@ -33,6 +33,9 @@ impl FirewallService {
         if let Err(e) = self.load_zones_from_db(&pool) {
             eprintln!("[firewall] load zones from db failed: {e}");
         }
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules on attach failed: {e}");
+        }
         *self.pool.write().expect("firewall pool lock") = Some(pool);
         eprintln!("[firewall] persistence attached");
     }
@@ -167,14 +170,27 @@ impl FirewallService {
             .map(|(name, _)| name.clone())
     }
 
+    fn run_nft_shell(script: &str) -> FirewallResult<String> {
+        let output = std::process::Command::new("sh")
+            .args(["-c", script])
+            .output()
+            .map_err(|e| FirewallError::Internal(format!("nft shell failed: {e}")))?;
+
+        if output.status.success() {
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        } else {
+            Err(FirewallError::Internal(
+                String::from_utf8_lossy(&output.stderr).into_owned(),
+            ))
+        }
+    }
+
     fn ensure_accounting_base(&self) -> FirewallResult<()> {
-        // "add" is idempotent for tables/chains that already exist on
-        // recent nftables -- errors here are ignored on purpose.
-        let _ = Self::run_nft(&["add", "table", "inet", "accounting"]);
-        let _ = Self::run_nft(&[
-            "add", "chain", "inet", "accounting", "forward", "{", "type", "filter", "hook",
-            "forward", "priority", "0", ";", "policy", "accept", ";", "}",
-        ]);
+        // خطا را نادیده نگیر برای table؛ اگر از قبل باشد nft معمولاً error می‌دهد — آن را ignore کن
+        let _ = Self::run_nft_shell("nft add table inet accounting 2>/dev/null");
+        let _ = Self::run_nft_shell(
+            "nft 'add chain inet accounting forward { type filter hook forward priority 0; policy accept; }' 2>/dev/null",
+        );
         Ok(())
     }
 
@@ -213,6 +229,19 @@ impl FirewallService {
             "add", "rule", "inet", "accounting", "forward",
             "oifname", &wan, "ip", "saddr", ip, "counter", "name", &out_name,
         ])?;
+
+        Self::run_nft_shell(&format!(
+            "nft add counter inet accounting {in_name}"
+        ))?;
+        Self::run_nft_shell(&format!(
+            "nft add counter inet accounting {out_name}"
+        ))?;
+        Self::run_nft_shell(&format!(
+            "nft add rule inet accounting forward iifname \"{wan}\" ip daddr {ip} counter name {in_name}"
+        ))?;
+        Self::run_nft_shell(&format!(
+            "nft add rule inet accounting forward oifname \"{wan}\" ip saddr {ip} counter name {out_name}"
+        ))?;
 
         Ok(())
     }
@@ -274,8 +303,12 @@ impl FirewallService {
 
         Ok(())
     }
+
+    fn persist_insert(&self, rule: &FirewallRule) {
         let guard = self.pool.read().expect("firewall pool lock");
-        let Some(pool) = guard.as_ref() else { return };
+        let Some(pool) = guard.as_ref() else {
+            return;
+        };
 
         let row = rule_to_row(rule);
         let repo = FirewallRepo::new(pool.inner());
@@ -286,7 +319,9 @@ impl FirewallService {
 
     fn persist_delete(&self, id: Uuid) {
         let guard = self.pool.read().expect("firewall pool lock");
-        let Some(pool) = guard.as_ref() else { return };
+        let Some(pool) = guard.as_ref() else {
+            return;
+        };
 
         let repo = FirewallRepo::new(pool.inner());
         if let Err(e) = Self::block_on(repo.delete(id)) {
@@ -316,6 +351,11 @@ impl FirewallService {
         let id = rule.id;
         self.registry.add(rule.clone());
         self.persist_insert(&rule);
+        self.registry.add(rule.clone());
+        self.persist_insert(&rule);
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules after add failed: {e}");
+        }
         Ok(id)
     }
 
@@ -330,16 +370,22 @@ impl FirewallService {
     pub fn remove_rule(&self, id: Uuid) -> FirewallResult<()> {
         self.registry.remove(id)?;
         self.persist_delete(id);
+        self.registry.remove(id)?;
+        self.persist_delete(id);
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules after remove failed: {e}");
+        }
+        Ok(())
+        }
+    
+    pub fn enable_rule(&self, id: Uuid) -> FirewallResult<()> {
+        self.registry.set_enabled(id, true)?;
         Ok(())
     }
 
-    pub fn enable_rule(&self, id: Uuid) -> FirewallResult<()> {
-        self.registry.set_enabled(id, true)
-        // TODO: persist enabled flag (نیاز به update در FirewallRepo)
-    }
-
     pub fn disable_rule(&self, id: Uuid) -> FirewallResult<()> {
-        self.registry.set_enabled(id, false)
+        self.registry.set_enabled(id, false)?;
+        Ok(())
     }
 
     pub fn count(&self) -> usize {
@@ -372,6 +418,117 @@ impl FirewallService {
             self.remove_rule(id)?;
         }
         Ok(n)
+    }
+
+    fn ensure_filter_base(&self) -> FirewallResult<()> {
+        let _ = Self::run_nft(&["add", "table", "inet", "dezh_filter"]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "inet", "dezh_filter", "input", "{", "type", "filter",
+            "hook", "input", "priority", "0", ";", "policy", "accept", ";", "}",
+        ]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "inet", "dezh_filter", "forward", "{", "type", "filter",
+            "hook", "forward", "priority", "0", ";", "policy", "accept", ";", "}",
+        ]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "inet", "dezh_filter", "output", "{", "type", "filter",
+            "hook", "output", "priority", "0", ";", "policy", "accept", ";", "}",
+        ]);
+        Ok(())
+    }
+
+    fn flush_filter_chains(&self) -> FirewallResult<()> {
+        let _ = Self::run_nft(&["flush", "chain", "inet", "dezh_filter", "input"]);
+        let _ = Self::run_nft(&["flush", "chain", "inet", "dezh_filter", "forward"]);
+        let _ = Self::run_nft(&["flush", "chain", "inet", "dezh_filter", "output"]);
+        Ok(())
+    }
+
+    fn action_to_nft(action: &RuleAction) -> &'static str {
+        match action {
+            RuleAction::Allow => "accept",
+            RuleAction::Deny | RuleAction::Drop => "drop",
+            RuleAction::Reject => "reject",
+        }
+    }
+
+    fn protocol_to_nft(p: &Protocol) -> Option<&'static str> {
+        match p {
+            Protocol::Tcp => Some("tcp"),
+            Protocol::Udp => Some("udp"),
+            Protocol::Icmp => Some("icmp"),
+            Protocol::Any => None,
+        }
+    }
+
+    fn chain_for_direction(dir: &RuleDirection) -> &'static [&'static str] {
+        match dir {
+            RuleDirection::Inbound => &["input"],
+            RuleDirection::Outbound => &["output"],
+            RuleDirection::Both => &["input", "output"],
+        }
+    }
+
+    /// بازسازی کامل ruleset فیلتر از روی registry (منبع حقیقت = DB/RAM)
+    pub fn apply_rules(&self) -> FirewallResult<()> {
+        self.ensure_filter_base()?;
+        self.flush_filter_chains()?;
+
+        let mut rules = self.registry.list();
+        rules.sort_by_key(|r| r.priority);
+
+        for rule in rules.iter().filter(|r| r.enabled) {
+            let verdict = Self::action_to_nft(&rule.action);
+            let chains = Self::chain_for_direction(&rule.direction);
+
+            for chain in chains {
+                let mut args: Vec<String> = vec![
+                    "add".into(),
+                    "rule".into(),
+                    "inet".into(),
+                    "dezh_filter".into(),
+                    (*chain).into(),
+                ];
+
+                if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
+                    args.push("ip".into());
+                    args.push("protocol".into());
+                    args.push(proto.into());
+                }
+
+                if rule.source != "any" {
+                    args.push("ip".into());
+                    args.push("saddr".into());
+                    args.push(rule.source.clone());
+                }
+                if rule.destination != "any" {
+                    args.push("ip".into());
+                    args.push("daddr".into());
+                    args.push(rule.destination.clone());
+                }
+
+                if let Some(port) = rule.port {
+                    if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
+                        if proto == "tcp" || proto == "udp" {
+                            args.push(proto.into());
+                            args.push("dport".into());
+                            args.push(port.to_string());
+                        }
+                    }
+                }
+
+                args.push(verdict.into());
+
+                let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                Self::run_nft(&args_ref)?;
+            }
+        }
+
+        eprintln!(
+            "[firewall] applied {} enabled rule(s) to nftables",
+            rules.iter().filter(|r| r.enabled).count()
+        );
+        Ok(())
     }
 }
 

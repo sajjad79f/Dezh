@@ -198,4 +198,20 @@ impl<'a> AccountingRepo<'a> {
         .await?;
         Ok(rows)
     }
+    
+    pub async fn list_open_for_identity(
+        &self,
+        identity_id: Uuid,
+    ) -> StorageResult<Vec<Uuid>> {
+        let rows: Vec<(Uuid,)> = sqlx::query_as(
+            r#"
+            SELECT id FROM accounting_sessions
+            WHERE identity_id = $1 AND ended_at IS NULL
+            "#,
+        )
+        .bind(identity_id)
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(id,)| id).collect())
+    }
 }

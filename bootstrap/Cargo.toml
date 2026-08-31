@@ -18,5 +18,7 @@ dde = { path = "../core/dde" }
 monitoring = { path = "../modules/monitoring" }
 firewall   = { path = "../modules/firewall" }
 vpn         = { path = "../modules/vpn" }
+routing = { path = "../modules/routing" }
+accounting = { path = "../modules/accounting" }
 
 uuid.workspace = true

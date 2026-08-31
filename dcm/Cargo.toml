@@ -11,7 +11,9 @@ contracts = { path = "../contracts" }
 bootstrap = { path = "../bootstrap" }
 api = { path = "../api" }
 storage = { path = "../storage" }
-firewall = { path = "../modules/firewall" }
 dai = { path = "../core/dai" }
+
+accounting = { path = "../modules/accounting" }
+firewall = { path = "../modules/firewall" }
 
 tokio = { workspace = true }

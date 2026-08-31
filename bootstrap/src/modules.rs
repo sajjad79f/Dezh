@@ -6,6 +6,8 @@ use dai::DaiService;
 
 use firewall::FirewallModule;
 use monitoring::MonitoringModule;
+use routing::RoutingModule;
+use accounting::AccountingModule;
 
 pub fn register(
     services: &ServiceContainer,
@@ -22,7 +24,8 @@ pub fn register(
         .clone();
 
     modules.register(FirewallModule::new());
-
+    modules.register(RoutingModule::new());
+    modules.register(AccountingModule::new());
     modules.register(MonitoringModule::new(
         Arc::new(def),
         Arc::new(dai),

@@ -53,7 +53,17 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/agent/user-active", post(handlers::agent_user_active))
         .route("/api/agent/user-inactive", post(handlers::agent_user_inactive))
-
+        .route("/api/firewall/interfaces", get(handlers::list_interfaces))
+        .route("/api/firewall/interfaces/zone", post(handlers::set_interface_zone))
+        .route(
+            "/api/routing/routes",
+            get(handlers::list_routes).post(handlers::add_route),
+        )
+        .route(
+            "/api/routing/default",
+            post(handlers::set_default_gateway),
+        )
+        
         .layer(cors)
         .with_state(state)
 }

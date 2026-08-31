@@ -5,14 +5,19 @@ use axum::{
     Json,
 };
 
-use firewall::{FirewallService, Protocol, RuleAction, RuleDirection};
+use firewall::{
+    FirewallService,
+    Protocol,
+    RuleAction,
+    RuleDirection,
+    Zone
+};
+use routing::RoutingService;
+use accounting::{AccountingError, AccountingService};
 use shared_kernel::prelude::*;
 
 use crate::console::CONSOLE_HTML;
-use crate::dto::{
-    CommandDto, CoreServiceDto, CreateFirewallRuleRequest, ErrorDto,
-    ExecuteCommandRequest, ExecuteCommandResponse, FirewallRuleDto, ModuleDto,
-};
+
 use crate::state::AppState;
 
 use storage::{SessionRepo, UserRepo, AccountingRepo, AuditRepo, DbPool, IdentityRepo};
@@ -30,7 +35,20 @@ use crate::dto::{
     LoginResponse,
     MeResponse,
     EndSessionRequest,
-    StartSessionRequest
+    StartSessionRequest,
+    InterfaceDto,
+    SetZoneRequest,
+    AddRouteRequest,
+    RouteDto,
+    SetDefaultGatewayRequest,
+    CommandDto,
+    CoreServiceDto,
+    CreateFirewallRuleRequest,
+    ErrorDto,
+    ExecuteCommandRequest,
+    ExecuteCommandResponse,
+    FirewallRuleDto,
+    ModuleDto,
 };
 
 pub async fn console() -> Html<&'static str> {
@@ -750,116 +768,242 @@ pub async fn end_session(
     }
 }
 
-pub async fn agent_user_active(
-    _user: AuthUser, // فعلاً با توکن پنل؛ بعداً agent token جدا
+pub async fn list_interfaces(
+    _user: AuthUser,
     State(state): State<AppState>,
-    Json(req): Json<AgentUserActiveRequest>,
 ) -> impl IntoResponse {
-    let username = req.username.trim();
-    if username.is_empty() {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "firewall unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match fw.list_interfaces() {
+        Ok(list) => {
+            let dtos: Vec<InterfaceDto> = list
+                .into_iter()
+                .map(|i| InterfaceDto {
+                    name: i.name,
+                    zone: i.zone.to_string(),
+                    up: i.up,
+                    addresses: i.addresses,
+                })
+                .collect();
+            (StatusCode::OK, Json(dtos)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn set_interface_zone(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<SetZoneRequest>,
+) -> impl IntoResponse {
+    let Some(zone) = Zone::parse(&req.zone) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorDto {
-                error: "username required".into(),
+                error: "zone must be lan|wan|dmz".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    if req.name.trim().is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: "name required".into(),
             }),
         )
             .into_response();
     }
 
-    let Some(pool) = state.services.resolve::<DbPool>() else {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorDto {
-                error: "database unavailable".into(),
+                error: "firewall unavailable".into(),
             }),
         )
             .into_response();
     };
 
-    let id_repo = IdentityRepo::new(pool.inner());
-    let acc_repo = AccountingRepo::new(pool.inner());
-
-    // پیدا یا ساخت identity
-    let identity_id = match id_repo.find_by_username(username).await {
-        Ok(Some(row)) => {
-            if !row.enabled {
-                return (
-                    StatusCode::FORBIDDEN,
-                    Json(ErrorDto {
-                        error: "identity disabled".into(),
-                    }),
-                )
-                    .into_response();
-            }
-            row.id
-        }
-        Ok(None) => match id_repo.create(username, req.hostname.as_deref(), "agent").await {
-            Ok(id) => id,
-            Err(e) => {
-                return (
-                    StatusCode::BAD_REQUEST,
-                    Json(ErrorDto {
-                        error: e.to_string(),
-                    }),
-                )
-                    .into_response();
-            }
-        },
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorDto {
-                    error: e.to_string(),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    match acc_repo.find_open_session(identity_id, "agent").await {
-        Ok(Some(existing_id)) => (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "session_id": existing_id.to_string(),
-                "identity_id": identity_id.to_string(),
-                "reused": true,
-            })),
+    match fw.set_zone(req.name.trim(), zone) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
         )
             .into_response(),
-        Ok(None) => match acc_repo
-            .start_session(Some(identity_id), "agent", req.ip_address.as_deref())
-            .await
-        {
-            Ok(session_id) => {
-                let _ = AuditRepo::new(pool.inner())
-                    .log(
-                        Some(username),
-                        "agent_user_active",
-                        Some(&session_id.to_string()),
-                        serde_json::json!({ "ip_address": req.ip_address }),
-                    )
-                    .await;
+    }
+}
 
-                (
-                    StatusCode::CREATED,
-                    Json(serde_json::json!({
-                        "session_id": session_id.to_string(),
-                        "identity_id": identity_id.to_string(),
-                        "reused": false,
-                    })),
-                )
-                    .into_response()
-            }
-            Err(e) => (
-                StatusCode::BAD_REQUEST,
-                Json(ErrorDto {
-                    error: e.to_string(),
-                }),
-            )
-                .into_response(),
-        },
+pub async fn list_routes(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(rt) = state.services.resolve::<RoutingService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "routing unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match rt.list_routes() {
+        Ok(list) => {
+            let dtos: Vec<RouteDto> = list
+                .into_iter()
+                .map(|r| RouteDto {
+                    destination: r.destination,
+                    gateway: r.gateway,
+                    device: r.device,
+                    proto: r.proto,
+                    metric: r.metric,
+                })
+                .collect();
+            (StatusCode::OK, Json(dtos)).into_response()
+        }
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn add_route(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<AddRouteRequest>,
+) -> impl IntoResponse {
+    let Some(rt) = state.services.resolve::<RoutingService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "routing unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match rt.add_route(
+        &req.destination,
+        req.gateway.as_deref(),
+        req.device.as_deref(),
+    ) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn set_default_gateway(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<SetDefaultGatewayRequest>,
+) -> impl IntoResponse {
+    let Some(rt) = state.services.resolve::<RoutingService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "routing unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match rt.set_default_gateway(&req.gateway, req.device.as_deref()) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn agent_user_active(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<AgentUserActiveRequest>,
+) -> impl IntoResponse {
+    let Some(acc) = state.services.resolve::<AccountingService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "accounting unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match acc
+        .user_active(
+            &req.username,
+            req.hostname.as_deref(),
+            req.ip_address.as_deref(),
+        )
+        .await
+    {
+        Ok(out) => {
+            let status = if out.reused {
+                StatusCode::OK
+            } else {
+                StatusCode::CREATED
+            };
+            (
+                status,
+                Json(serde_json::json!({
+                    "session_id": out.session_id.to_string(),
+                    "identity_id": out.identity_id.to_string(),
+                    "reused": out.reused,
+                    "accounting_error": out.accounting_error,
+                })),
+            )
+                .into_response()
+        }
+        Err(AccountingError::IdentityDisabled) => (
+            StatusCode::FORBIDDEN,
+            Json(ErrorDto {
+                error: "identity disabled".into(),
+            }),
+        )
+            .into_response(),
+        Err(AccountingError::DbUnavailable) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "database unavailable".into(),
+            }),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
             Json(ErrorDto {
                 error: e.to_string(),
             }),
@@ -873,77 +1017,32 @@ pub async fn agent_user_inactive(
     State(state): State<AppState>,
     Json(req): Json<AgentUserInactiveRequest>,
 ) -> impl IntoResponse {
-    let username = req.username.trim();
-    if username.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorDto {
-                error: "username required".into(),
-            }),
-        )
-            .into_response();
-    }
-
-    let Some(pool) = state.services.resolve::<DbPool>() else {
+    let Some(acc) = state.services.resolve::<AccountingService>() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(ErrorDto {
-                error: "database unavailable".into(),
+                error: "accounting unavailable".into(),
             }),
         )
             .into_response();
     };
 
-    let id_repo = IdentityRepo::new(pool.inner());
-    let acc_repo = AccountingRepo::new(pool.inner());
-
-    let identity_id = match id_repo.find_by_username(username).await {
-        Ok(Some(row)) => row.id,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(ErrorDto {
-                    error: "identity not found".into(),
-                }),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorDto {
-                    error: e.to_string(),
-                }),
-            )
-                .into_response();
-        }
-    };
-
-    match acc_repo
-        .end_open_sessions_for_identity(
-            identity_id,
-            req.bytes_in,
-            req.bytes_out,
-            Some("agent-inactive"),
-        )
+    match acc
+        .user_inactive(&req.username, req.bytes_in, req.bytes_out)
         .await
     {
-        Ok(n) => {
-            let _ = AuditRepo::new(pool.inner())
-                .log(
-                    Some(username),
-                    "agent_user_inactive",
-                    Some(&identity_id.to_string()),
-                    serde_json::json!({ "closed_sessions": n }),
-                )
-                .await;
-
-            (
-                StatusCode::OK,
-                Json(serde_json::json!({ "closed": n })),
-            )
-                .into_response()
-        }
+        Ok(n) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "closed": n })),
+        )
+            .into_response(),
+        Err(AccountingError::IdentityNotFound) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorDto {
+                error: "identity not found".into(),
+            }),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
             Json(ErrorDto {

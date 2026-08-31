@@ -53,6 +53,12 @@ impl Application {
             if let Some(dai) = self.services.resolve::<dai::DaiService>() {
                 dai.attach_pool((*pool).clone());
             }
+            if let Some(acc) = self.services.resolve::<accounting::AccountingService>() {
+                acc.attach_pool((*pool).clone());
+                if let Some(fw) = self.services.resolve::<firewall::FirewallService>() {
+                    acc.attach_firewall((*fw).clone());
+                }
+            }
         }
 
         let modules = Arc::new(self.modules);

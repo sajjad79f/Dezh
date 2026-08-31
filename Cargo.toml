@@ -26,6 +26,8 @@ members = [
     "modules/nac",
     "modules/ids",
     "modules/ips",
+    "modules/routing",
+    "modules/accounting",
 
     "agents/windows-agent",
     "agents/linux-agent",

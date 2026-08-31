@@ -174,3 +174,39 @@ pub struct AgentUserInactiveRequest {
     #[serde(default)]
     pub bytes_out: i64,
 }
+
+#[derive(Serialize)]
+pub struct InterfaceDto {
+    pub name: String,
+    pub zone: String,
+    pub up: bool,
+    pub addresses: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetZoneRequest {
+    pub name: String,
+    pub zone: String,
+}
+
+#[derive(Serialize)]
+pub struct RouteDto {
+    pub destination: String,
+    pub gateway: Option<String>,
+    pub device: Option<String>,
+    pub proto: Option<String>,
+    pub metric: Option<u32>,
+}
+
+#[derive(Deserialize)]
+pub struct AddRouteRequest {
+    pub destination: String,
+    pub gateway: Option<String>,
+    pub device: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct SetDefaultGatewayRequest {
+    pub gateway: String,
+    pub device: Option<String>,
+}
