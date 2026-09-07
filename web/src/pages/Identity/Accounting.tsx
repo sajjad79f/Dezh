@@ -1,3 +1,4 @@
+// pages/identity/Accounting.tsx
 import { useCallback, useEffect, useState } from 'react'
 
 type LiveSession = {
@@ -45,7 +46,7 @@ function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
   if (n < 1024 ** 3) return `${(n / 1024 ** 2).toFixed(1)} MB`
-  return `${(n / 1024 ** 3).toFixed(2)} GB`
+  return `${(n / 1024 ** 3).toFixed(2)} GB}`
 }
 
 function fmtTime(iso: string): string {
@@ -63,6 +64,7 @@ const th: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--text-muted, #8b8b9a)',
 }
+
 const td: React.CSSProperties = {
   padding: '8px 10px',
   borderBottom: '1px solid rgba(255,255,255,0.06)',
@@ -113,7 +115,7 @@ export default function Accounting() {
 
   useEffect(() => {
     loadLive()
-    const t = setInterval(loadLive, 10_000) // رفرش زنده هر ۱۰ ثانیه
+    const t = setInterval(loadLive, 10_000)
     return () => clearInterval(t)
   }, [loadLive])
 
@@ -124,7 +126,6 @@ export default function Accounting() {
 
   async function endSession(id: string) {
     try {
-      // بایت‌ها سمت سرور از counterهای nft محاسبه می‌شوند؛ صفر می‌فرستیم
       const res = await fetch('/api/accounting/sessions/end', {
         method: 'POST',
         headers: { ...headers(), 'Content-Type': 'application/json' },

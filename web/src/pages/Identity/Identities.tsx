@@ -1,34 +1,38 @@
 import { FormEvent, useEffect, useState } from 'react'
-import { getToken } from '../api/auth'
+import { getToken } from '../../api/auth'
 
-interface User {
+interface Identity {
   id: string
   username: string
-  role: string
   display_name: string | null
+  source: string
   enabled: boolean
 }
 
-export function Users() {
-  const [users, setUsers] = useState<User[]>([])
+export function IdentitiesPage() {
+  const [identities, setIdentities] = useState<Identity[]>([])
   const [error, setError] = useState<string | null>(null)
   const [username, setUsername] = useState('')
-  const [password, setPassword] = useState('')
-  const [role, setRole] = useState('operator')
+  const [displayName, setDisplayName] = useState('')
   const [loading, setLoading] = useState(false)
 
-  async function load() {
+  function headers(json = false): HeadersInit {
     const token = getToken()
-    const res = await fetch('/api/users', {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      setError(err.error || `HTTP ${res.status}`)
-      return
+    return {
+      ...(json ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }
-    setUsers(await res.json())
-    setError(null)
+  }
+
+  async function load() {
+    try {
+      const res = await fetch('/api/identities', { headers: headers() })
+      if (!res.ok) throw new Error((await res.json()).error || res.statusText)
+      setIdentities(await res.json())
+      setError(null)
+    } catch (e: any) {
+      setError(e.message)
+    }
   }
 
   useEffect(() => {
@@ -39,24 +43,24 @@ export function Users() {
     e.preventDefault()
     setLoading(true)
     try {
-      const token = getToken()
-      const res = await fetch('/api/users', {
+      const res = await fetch('/api/identities', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ username, password, role }),
+        headers: headers(true),
+        body: JSON.stringify({
+          username,
+          display_name: displayName || null,
+          source: 'local',
+        }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }))
         throw new Error(err.error || 'failed')
       }
       setUsername('')
-      setPassword('')
+      setDisplayName('')
       await load()
-    } catch (err: any) {
-      setError(err.message)
+    } catch (e: any) {
+      setError(e.message)
     } finally {
       setLoading(false)
     }
@@ -64,16 +68,15 @@ export function Users() {
 
   return (
     <div>
-      <h1 className="page-title">Users</h1>
+      <h1 className="page-title">Identities</h1>
       {error && (
         <div className="card" style={{ color: 'var(--danger)', marginBottom: 16 }}>
           {error}
         </div>
       )}
-
       <div className="grid grid-2">
         <div className="card">
-          <h3>Create user</h3>
+          <h3>Add identity</h3>
           <form onSubmit={onCreate} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <input
               placeholder="Username"
@@ -83,42 +86,31 @@ export function Users() {
               style={inputStyle}
             />
             <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+              placeholder="Display name"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
               style={inputStyle}
             />
-            <select value={role} onChange={(e) => setRole(e.target.value)} style={inputStyle}>
-              <option value="admin">admin</option>
-              <option value="operator">operator</option>
-              <option value="viewer">viewer</option>
-            </select>
             <button type="submit" disabled={loading} style={btnStyle}>
               {loading ? 'Creating…' : 'Create'}
             </button>
           </form>
         </div>
-
         <div className="card">
-          <h3>All users ({users.length})</h3>
+          <h3>All ({identities.length})</h3>
           <ul style={{ listStyle: 'none' }}>
-            {users.map((u) => (
+            {identities.map((i) => (
               <li
-                key={u.id}
+                key={i.id}
                 style={{
-                  padding: '10px 0',
+                  padding: '8px 0',
                   borderBottom: '1px solid var(--border)',
                   display: 'flex',
                   justifyContent: 'space-between',
                 }}
               >
-                <span>
-                  {u.username}
-                  {u.display_name ? ` (${u.display_name})` : ''}
-                </span>
-                <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>{u.role}</span>
+                <span>{i.username}</span>
+                <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{i.source}</span>
               </li>
             ))}
           </ul>
