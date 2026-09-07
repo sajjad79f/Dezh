@@ -7,7 +7,7 @@ mod auth;
 pub use state::AppState;
 
 use axum::http::Method;
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
 
@@ -51,6 +51,12 @@ pub fn router(state: AppState) -> Router {
             "/api/accounting/sessions/end",
             post(handlers::end_session),
         )
+                .route(
+            "/api/accounting/sessions/history",
+            get(handlers::list_session_history),
+        )
+        .route("/api/accounting/usage", get(handlers::usage_summary))
+        .route("/api/identities/{id}", patch(handlers::update_identity))
         .route("/api/agent/user-active", post(handlers::agent_user_active))
         .route("/api/agent/user-inactive", post(handlers::agent_user_inactive))
         .route("/api/firewall/interfaces", get(handlers::list_interfaces))

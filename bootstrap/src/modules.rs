@@ -7,7 +7,7 @@ use dai::DaiService;
 use firewall::FirewallModule;
 use monitoring::MonitoringModule;
 use routing::RoutingModule;
-use accounting::AccountingModule;
+use accounting::{AccountingModule, AccountingService};
 
 pub fn register(
     services: &ServiceContainer,
@@ -25,7 +25,14 @@ pub fn register(
 
     modules.register(FirewallModule::new());
     modules.register(RoutingModule::new());
-    modules.register(AccountingModule::new());
+
+    // اکانتینگ به سرویس خودش وصل می‌شود تا interim/GC task بتواند راه بیفتد
+    let accounting = services
+        .resolve::<AccountingService>()
+        .expect("AccountingService not registered")
+        .clone();
+    modules.register(AccountingModule::new(Arc::new(accounting)));
+
     modules.register(MonitoringModule::new(
         Arc::new(def),
         Arc::new(dai),

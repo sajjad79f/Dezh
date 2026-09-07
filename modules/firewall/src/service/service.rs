@@ -186,16 +186,58 @@ impl FirewallService {
     }
 
     fn ensure_accounting_base(&self) -> FirewallResult<()> {
-        // خطا را نادیده نگیر برای table؛ اگر از قبل باشد nft معمولاً error می‌دهد — آن را ignore کن
-        let _ = Self::run_nft_shell("nft add table inet accounting 2>/dev/null");
-        let _ = Self::run_nft_shell(
-            "nft 'add chain inet accounting forward { type filter hook forward priority 0; policy accept; }' 2>/dev/null",
-        );
+        // اگر table/chain از قبل موجود باشد nft خطا می‌دهد؛ عمداً نادیده گرفته می‌شود
+        let _ = Self::run_nft(&["add", "table", "inet", "accounting"]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "inet", "accounting", "forward",
+            "{", "type", "filter", "hook", "forward", "priority", "0;",
+            "policy", "accept;", "}",
+        ]);
         Ok(())
     }
 
     fn counter_name(session_id: Uuid, direction: &str) -> String {
         format!("sess_{}_{}", session_id.simple(), direction)
+    }
+
+    /// فقط IP واقعی (IPv4/IPv6) می‌پذیرد و شکل استاندارد آن را برمی‌گرداند.
+    /// هر رشته دیگری → خطا؛ یعنی هیچ ورودی دستکاری‌شده‌ای به nft نمی‌رسد.
+    fn validate_ip(ip: &str) -> FirewallResult<String> {
+        let parsed: std::net::IpAddr = ip
+            .trim()
+            .parse()
+            .map_err(|_| FirewallError::InvalidRule(format!("invalid IP address: '{ip}'")))?;
+        Ok(parsed.to_string())
+    }
+
+    /// مثل validate_ip، اما CIDR (مثل 192.168.1.0/24) را هم قبول می‌کند.
+    fn validate_ip_or_cidr(value: &str) -> FirewallResult<String> {
+        let v = value.trim();
+        let (ip_part, prefix) = match v.split_once('/') {
+            Some((ip, p)) => (ip, Some(p)),
+            None => (v, None),
+        };
+
+        let parsed: std::net::IpAddr = ip_part
+            .parse()
+            .map_err(|_| FirewallError::InvalidRule(format!("invalid IP/CIDR: '{value}'")))?;
+
+        if let Some(p) = prefix {
+            let max = match parsed {
+                std::net::IpAddr::V4(_) => 32u8,
+                std::net::IpAddr::V6(_) => 128u8,
+            };
+            let p: u8 = p
+                .parse()
+                .map_err(|_| FirewallError::InvalidRule(format!("invalid prefix in '{value}'")))?;
+            if p > max {
+                return Err(FirewallError::InvalidRule(format!(
+                    "prefix /{p} is too large for '{ip_part}'"
+                )));
+            }
+        }
+
+        Ok(v.to_string())
     }
 
     /// Starts counting bytes for `ip`, but only for traffic that
@@ -204,6 +246,9 @@ impl FirewallService {
     /// should count internet traffic, not internal traffic). Returns
     /// an error if no interface is currently assigned the `Wan` zone.
     pub fn start_accounting(&self, session_id: Uuid, ip: &str) -> FirewallResult<()> {
+        // فقط IP معتبر؛ رشته مشکوک همان‌جا با خطا رد می‌شود
+        let ip = Self::validate_ip(ip)?;
+
         let Some(wan) = self.wan_interface() else {
             return Err(FirewallError::Internal(
                 "no interface is assigned the 'wan' zone yet".into(),
@@ -221,27 +266,14 @@ impl FirewallService {
         // Inbound: comes IN through the WAN interface, destined for this IP.
         Self::run_nft(&[
             "add", "rule", "inet", "accounting", "forward",
-            "iifname", &wan, "ip", "daddr", ip, "counter", "name", &in_name,
+            "iifname", &wan, "ip", "daddr", &ip, "counter", "name", &in_name,
         ])?;
 
         // Outbound: leaves OUT through the WAN interface, sourced from this IP.
         Self::run_nft(&[
             "add", "rule", "inet", "accounting", "forward",
-            "oifname", &wan, "ip", "saddr", ip, "counter", "name", &out_name,
+            "oifname", &wan, "ip", "saddr", &ip, "counter", "name", &out_name,
         ])?;
-
-        Self::run_nft_shell(&format!(
-            "nft add counter inet accounting {in_name}"
-        ))?;
-        Self::run_nft_shell(&format!(
-            "nft add counter inet accounting {out_name}"
-        ))?;
-        Self::run_nft_shell(&format!(
-            "nft add rule inet accounting forward iifname \"{wan}\" ip daddr {ip} counter name {in_name}"
-        ))?;
-        Self::run_nft_shell(&format!(
-            "nft add rule inet accounting forward oifname \"{wan}\" ip saddr {ip} counter name {out_name}"
-        ))?;
 
         Ok(())
     }
@@ -351,8 +383,6 @@ impl FirewallService {
         let id = rule.id;
         self.registry.add(rule.clone());
         self.persist_insert(&rule);
-        self.registry.add(rule.clone());
-        self.persist_insert(&rule);
         if let Err(e) = self.apply_rules() {
             eprintln!("[firewall] apply_rules after add failed: {e}");
         }
@@ -370,13 +400,11 @@ impl FirewallService {
     pub fn remove_rule(&self, id: Uuid) -> FirewallResult<()> {
         self.registry.remove(id)?;
         self.persist_delete(id);
-        self.registry.remove(id)?;
-        self.persist_delete(id);
         if let Err(e) = self.apply_rules() {
             eprintln!("[firewall] apply_rules after remove failed: {e}");
         }
         Ok(())
-        }
+    }
     
     pub fn enable_rule(&self, id: Uuid) -> FirewallResult<()> {
         self.registry.set_enabled(id, true)?;

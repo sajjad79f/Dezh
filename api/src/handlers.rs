@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, State, Query},
     http::StatusCode,
     response::{Html, IntoResponse},
     Json,
@@ -49,6 +49,9 @@ use crate::dto::{
     ExecuteCommandResponse,
     FirewallRuleDto,
     ModuleDto,
+    HistoryQuery,
+    UsageQuery,
+    UpdateIdentityRequest
 };
 
 pub async fn console() -> Html<&'static str> {
@@ -609,19 +612,40 @@ pub async fn list_active_sessions(
             .into_response();
     };
 
+    let fw = state.services.resolve::<FirewallService>().cloned();
+
     match AccountingRepo::new(pool.inner()).list_active().await {
         Ok(rows) => {
-            let list: Vec<AccountingSessionDto> = rows
+            let list: Vec<serde_json::Value> = rows
                 .into_iter()
-                .map(|r| AccountingSessionDto {
-                    id: r.id.to_string(),
-                    identity_id: r.identity_id.map(|id| id.to_string()),
-                    protocol: r.protocol,
-                    ip_address: r.ip_address,
-                    started_at: r.started_at.to_rfc3339(),
-                    ended_at: r.ended_at.map(|t| t.to_rfc3339()),
-                    bytes_in: r.bytes_in,
-                    bytes_out: r.bytes_out,
+                .map(|r| {
+                    let (live_in, live_out, has_live) = match &fw {
+                        Some(f) => match f.read_accounting(r.id) {
+                            Ok((i, o)) => (i, o, true),
+                            Err(_) => (r.bytes_in, r.bytes_out, false),
+                        },
+                        None => (r.bytes_in, r.bytes_out, false),
+                    };
+                    let hostname = r
+                        .metadata
+                        .get("hostname")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+
+                    serde_json::json!({
+                        "id": r.id.to_string(),
+                        "identity_id": r.identity_id.map(|i| i.to_string()),
+                        "protocol": r.protocol,
+                        "ip_address": r.ip_address,
+                        "hostname": hostname,
+                        "started_at": r.started_at.to_rfc3339(),
+                        "ended_at": r.ended_at.map(|t| t.to_rfc3339()),
+                        "bytes_in": r.bytes_in,
+                        "bytes_out": r.bytes_out,
+                        "live_bytes_in": live_in,
+                        "live_bytes_out": live_out,
+                        "has_live_counters": has_live,
+                    })
                 })
                 .collect();
             (StatusCode::OK, Json(list)).into_response()
@@ -733,13 +757,24 @@ pub async fn end_session(
             .into_response();
     };
 
+    // ابتدا counterهای nft را بخوان و پاک کن تا در kernel نشت نکنند
+    let (mut bytes_in, mut bytes_out) = (req.bytes_in, req.bytes_out);
+    if let Some(fw) = state.services.resolve::<FirewallService>().cloned() {
+        match fw.stop_accounting(session_id) {
+            Ok((i, o)) => {
+                bytes_in = i;
+                bytes_out = o;
+            }
+            Err(e) => {
+                eprintln!("[api] stop_accounting {session_id}: {e}");
+            }
+        }
+    }
+
+    let terminate_cause = req.terminate_cause.clone().unwrap_or_else(|| "manual".into());
+
     match AccountingRepo::new(pool.inner())
-        .end_session(
-            session_id,
-            req.bytes_in,
-            req.bytes_out,
-            req.terminate_cause.as_deref(),
-        )
+        .end_session(session_id, bytes_in, bytes_out, Some(&terminate_cause))
         .await
     {
         Ok(()) => {
@@ -749,9 +784,9 @@ pub async fn end_session(
                     "session_end",
                     Some(&session_id.to_string()),
                     serde_json::json!({
-                        "bytes_in": req.bytes_in,
-                        "bytes_out": req.bytes_out,
-                        "terminate_cause": req.terminate_cause,
+                        "bytes_in": bytes_in,
+                        "bytes_out": bytes_out,
+                        "terminate_cause": terminate_cause,
                     }),
                 )
                 .await;
@@ -968,6 +1003,7 @@ pub async fn agent_user_active(
             &req.username,
             req.hostname.as_deref(),
             req.ip_address.as_deref(),
+            req.os.as_deref(),      // ← این خط اضافه شد
         )
         .await
     {
@@ -1045,6 +1081,207 @@ pub async fn agent_user_inactive(
             .into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+fn parse_dt_param(
+    s: Option<&str>,
+) -> Result<Option<chrono::DateTime<chrono::Utc>>, axum::response::Response> {
+    match s {
+        None | Some("") => Ok(None),
+        Some(v) => match chrono::DateTime::parse_from_rfc3339(v) {
+            Ok(dt) => Ok(Some(dt.with_timezone(&chrono::Utc))),
+            Err(_) => Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorDto {
+                    error: format!("invalid datetime '{v}' (use RFC3339)"),
+                }),
+            )
+                .into_response()),
+        },
+    }
+}
+
+/// GET /api/accounting/sessions/history?identity_id=&from=&to=&limit=&offset=
+pub async fn list_session_history(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Query(q): Query<HistoryQuery>,
+) -> impl IntoResponse {
+    let identity_id = match q.identity_id.as_deref() {
+        None | Some("") => None,
+        Some(s) => match Uuid::parse_str(s) {
+            Ok(id) => Some(id),
+            Err(_) => {
+                return (
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorDto {
+                        error: "invalid identity_id".into(),
+                    }),
+                )
+                    .into_response()
+            }
+        },
+    };
+
+    let from = match parse_dt_param(q.from.as_deref()) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let to = match parse_dt_param(q.to.as_deref()) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    let limit = q.limit.unwrap_or(100).clamp(1, 1000);
+    let offset = q.offset.unwrap_or(0).max(0);
+
+    let Some(pool) = state.services.resolve::<DbPool>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "database unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match AccountingRepo::new(pool.inner())
+        .list_history(identity_id, from, to, limit, offset)
+        .await
+    {
+        Ok(rows) => {
+            let list: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|r| {
+                    let hostname = r
+                        .metadata
+                        .get("hostname")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                    serde_json::json!({
+                        "id": r.id.to_string(),
+                        "identity_id": r.identity_id.map(|i| i.to_string()),
+                        "protocol": r.protocol,
+                        "ip_address": r.ip_address,
+                        "hostname": hostname,
+                        "started_at": r.started_at.to_rfc3339(),
+                        "ended_at": r.ended_at.map(|t| t.to_rfc3339()),
+                        "bytes_in": r.bytes_in,
+                        "bytes_out": r.bytes_out,
+                    })
+                })
+                .collect();
+            (StatusCode::OK, Json(list)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// GET /api/accounting/usage?from=&to=
+pub async fn usage_summary(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Query(q): Query<UsageQuery>,
+) -> impl IntoResponse {
+    let from = match parse_dt_param(q.from.as_deref()) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+    let to = match parse_dt_param(q.to.as_deref()) {
+        Ok(v) => v,
+        Err(resp) => return resp,
+    };
+
+    let Some(pool) = state.services.resolve::<DbPool>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "database unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match AccountingRepo::new(pool.inner()).usage_summary(from, to).await {
+        Ok(rows) => {
+            let list: Vec<serde_json::Value> = rows
+                .into_iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "identity_id": r.identity_id.map(|i| i.to_string()),
+                        "username": r.username,
+                        "sessions": r.sessions,
+                        "bytes_in": r.bytes_in,
+                        "bytes_out": r.bytes_out,
+                    })
+                })
+                .collect();
+            (StatusCode::OK, Json(list)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+/// PATCH /api/identities/{id}  { "enabled": false }
+pub async fn update_identity(
+    user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateIdentityRequest>,
+) -> impl IntoResponse {
+    // فقط ادمین — اگر نام فیلد نقش در AuthUser شما فرق دارد، با الگوی create_user هماهنگ کن
+    if user.role != "admin" {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorDto {
+                error: "admin only".into(),
+            }),
+        )
+            .into_response();
+    }
+
+    let Some(pool) = state.services.resolve::<DbPool>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "database unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match IdentityRepo::new(pool.inner()).set_enabled(id, req.enabled).await {
+        Ok(()) => {
+            let _ = AuditRepo::new(pool.inner())
+                .log(
+                    None,
+                    "identity_updated",
+                    Some(&id.to_string()),
+                    serde_json::json!({ "enabled": req.enabled }),
+                )
+                .await;
+            StatusCode::NO_CONTENT.into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorDto {
                 error: e.to_string(),
             }),

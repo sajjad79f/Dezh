@@ -9,6 +9,8 @@ import { Firewall } from './pages/Firewall'
 import { Login } from './pages/Login'
 import { Users } from './pages/Users'
 import { Identities } from './pages/Identities'
+import Accounting from './pages/Accounting'
+
 import './styles/global.css'
 import './components/Layout.css'
 
@@ -26,6 +28,7 @@ export default function App() {
             <Route path="/modules" element={<Modules />} />
             <Route path="/services" element={<Services />} />
             <Route path="/console" element={<Console />} />
+            <Route path="/accounting" element={<RequireAuth><Accounting /></RequireAuth>} />
             <Route path="/firewall" element={<Firewall />} />
           </Route>
         </Route>

@@ -30,6 +30,11 @@ impl Application {
     }
 
     pub async fn run(mut self) {
+        if let Err(e) = storage::run_migrations(pool.inner()).await {
+            eprintln!("[dcm] migration failed: {e}");
+            // اگر تابع Result برمی‌گرداند، بهتر است اینجا return Err کنی —
+            // سیستم بدون اسکیما نباید بالا بیاید
+        }
         let db_config = DatabaseConfig::from_env();
         match create_pool(&db_config).await {
             Ok(pool) => {

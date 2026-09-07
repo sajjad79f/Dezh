@@ -210,3 +210,23 @@ pub struct SetDefaultGatewayRequest {
     pub gateway: String,
     pub device: Option<String>,
 }
+
+#[derive(serde::Deserialize)]
+pub struct HistoryQuery {
+    pub identity_id: Option<String>,
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct UsageQuery {
+    pub from: Option<String>,
+    pub to: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct UpdateIdentityRequest {
+    pub enabled: bool,
+}

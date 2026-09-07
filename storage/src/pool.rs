@@ -54,3 +54,8 @@ pub async fn bootstrap_admin(pool: &DbPool) -> StorageResult<()> {
     }
     Ok(())
 }
+
+/// اجرای خودکار migrationها — در استارتاپ (dcm) صدا زده می‌شود
+pub async fn run_migrations(pool: &sqlx::PgPool) -> Result<(), sqlx::migrate::MigrateError> {
+    sqlx::migrate!("src/migrations").run(pool).await
+}

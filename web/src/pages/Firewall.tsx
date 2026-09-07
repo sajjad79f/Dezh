@@ -1,4 +1,8 @@
 import { useEffect, useState } from 'react'
+function headers(): Record<string, string> {
+  const token = localStorage.getItem('dezh_token') // ⚠️ کلید را از web/src/api/client.ts چک کن — همان که توکن آنجا ذخیره می‌شود
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
 
 interface Rule {
   id: string
@@ -61,7 +65,7 @@ export function Firewall() {
       }
       const res = await fetch('/api/firewall/rules', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { ...headers(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -77,8 +81,10 @@ export function Firewall() {
     }
   }
 
+  // قبل:  const res = await fetch('/api/firewall/rules')
+
   async function removeRule(id: string) {
-    const res = await fetch(`/api/firewall/rules/${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/firewall/rules/${id}`, { method: 'DELETE', headers: headers() })
     if (!res.ok && res.status !== 204) {
       const err = await res.json().catch(() => ({ error: res.statusText }))
       setError(err.error)

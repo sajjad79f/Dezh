@@ -37,12 +37,25 @@ impl AccountingService {
             .ok_or(AccountingError::DbUnavailable)
     }
 
+    /// بستن یک نشست با بهترین بایت موجود:
+    /// ۱) counterهای nft (خواندن + پاک‌سازی)  ۲) آخرین interim ثبت‌شده در DB
+    async fn final_bytes(&self, repo: &AccountingRepo<'_>, sid: Uuid) -> (i64, i64) {
+        if let Some(fw) = self.firewall.read().expect("accounting fw lock").clone() {
+            match fw.stop_accounting(sid) {
+                Ok(v) => return v,
+                Err(e) => eprintln!("[accounting] stop_accounting {sid}: {e}"),
+            }
+        }
+        repo.get_bytes(sid).await.unwrap_or((0, 0))
+    }
+
     /// Agent: کاربر فعال → identity + session (+ nft accounting)
     pub async fn user_active(
         &self,
         username: &str,
         hostname: Option<&str>,
         ip_address: Option<&str>,
+        os: Option<&str>,
     ) -> AccountingResult<UserActiveOutcome> {
         let username = username.trim();
         if username.is_empty() {
@@ -67,17 +80,37 @@ impl AccountingService {
             Err(e) => return Err(AccountingError::Message(e.to_string())),
         };
 
-        if let Ok(Some(existing_id)) = acc_repo.find_open_session(identity_id, "agent").await {
-            return Ok(UserActiveOutcome {
-                session_id: existing_id,
-                identity_id,
-                reused: true,
-                accounting_error: None,
-            });
+        // reuse هوشمند: نشست بازِ همان IP → reuse؛ IP متفاوت → بستن با بایت واقعی و نشست جدید
+        if let Ok(Some((existing_id, existing_ip))) =
+            acc_repo.find_open_session_with_ip(identity_id, "agent").await
+        {
+            let same_host = match (&existing_ip, ip_address) {
+                (Some(a), Some(b)) => a == b,
+                (None, None) => true,
+                _ => false,
+            };
+            if same_host {
+                return Ok(UserActiveOutcome {
+                    session_id: existing_id,
+                    identity_id,
+                    reused: true,
+                    accounting_error: None,
+                });
+            }
+
+            let (bin, bout) = self.final_bytes(&acc_repo, existing_id).await;
+            let _ = acc_repo
+                .end_session(existing_id, bin, bout, Some("ip-changed"))
+                .await;
         }
 
+        let metadata = serde_json::json!({
+            "hostname": hostname,
+            "os": os,
+        });
+
         let session_id = acc_repo
-            .start_session(Some(identity_id), "agent", ip_address)
+            .start_session_meta(Some(identity_id), "agent", ip_address, metadata)
             .await
             .map_err(|e| AccountingError::Message(e.to_string()))?;
 
@@ -96,7 +129,7 @@ impl AccountingService {
                 Some(username),
                 "agent_user_active",
                 Some(&session_id.to_string()),
-                serde_json::json!({ "ip": ip_address }),
+                serde_json::json!({ "ip": ip_address, "hostname": hostname, "os": os }),
             )
             .await;
 
@@ -135,21 +168,12 @@ impl AccountingService {
             .await
             .map_err(|e| AccountingError::Message(e.to_string()))?;
 
-        let fw = self.firewall.read().expect("accounting fw lock").clone();
         let mut closed = 0u64;
 
         for sid in open_ids {
-            let (bin, bout) = if let Some(ref fw) = fw {
-                match fw.stop_accounting(sid) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("[accounting] stop_accounting {sid}: {e}");
-                        (bytes_in, bytes_out)
-                    }
-                }
-            } else {
-                (bytes_in, bytes_out)
-            };
+            let (bin, bout) = self.final_bytes(&acc_repo, sid).await;
+            let bin = if bin == 0 && bytes_in != 0 { bytes_in } else { bin };
+            let bout = if bout == 0 && bytes_out != 0 { bytes_out } else { bout };
 
             if acc_repo
                 .end_session(sid, bin, bout, Some("agent-inactive"))
@@ -170,6 +194,50 @@ impl AccountingService {
             .await;
 
         Ok(closed)
+    }
+
+    /// یک دور interim: بایت‌های زنده nft همه نشست‌های باز را در DB می‌نویسد
+    pub async fn interim_once(&self) -> usize {
+        let Ok(pool) = self.pool() else { return 0 };
+        let acc_repo = AccountingRepo::new(pool.inner());
+        let Ok(open) = acc_repo.list_open_ids().await else { return 0 };
+        let Some(fw) = self.firewall.read().expect("accounting fw lock").clone() else {
+            return 0;
+        };
+
+        let mut updated = 0;
+        for sid in open {
+            if let Ok((bin, bout)) = fw.read_accounting(sid) {
+                if acc_repo.update_interim(sid, bin, bout).await.is_ok() {
+                    updated += 1;
+                }
+            }
+        }
+        updated
+    }
+
+    /// بستن نشست‌های بی‌صاحب که مدتی interim update نداشته‌اند
+    pub async fn close_stale_sessions(&self, max_idle_secs: u64) -> u64 {
+        let Ok(pool) = self.pool() else { return 0 };
+        let acc_repo = AccountingRepo::new(pool.inner());
+
+        let Ok(stale) = acc_repo
+            .close_stale(max_idle_secs.min(i32::MAX as u64) as i32, "lost-accounting")
+            .await
+        else {
+            return 0;
+        };
+
+        let n = stale.len() as u64;
+        if n > 0 {
+            if let Some(fw) = self.firewall.read().expect("accounting fw lock").clone() {
+                for sid in stale {
+                    let _ = fw.stop_accounting(sid);
+                }
+            }
+            eprintln!("[accounting] closed {n} stale session(s)");
+        }
+        n
     }
 }
 
