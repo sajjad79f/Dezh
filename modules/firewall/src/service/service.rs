@@ -170,21 +170,6 @@ impl FirewallService {
             .map(|(name, _)| name.clone())
     }
 
-    fn run_nft_shell(script: &str) -> FirewallResult<String> {
-        let output = std::process::Command::new("sh")
-            .args(["-c", script])
-            .output()
-            .map_err(|e| FirewallError::Internal(format!("nft shell failed: {e}")))?;
-
-        if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-        } else {
-            Err(FirewallError::Internal(
-                String::from_utf8_lossy(&output.stderr).into_owned(),
-            ))
-        }
-    }
-
     fn ensure_accounting_base(&self) -> FirewallResult<()> {
         // اگر table/chain از قبل موجود باشد nft خطا می‌دهد؛ عمداً نادیده گرفته می‌شود
         let _ = Self::run_nft(&["add", "table", "inet", "accounting"]);
@@ -210,6 +195,7 @@ impl FirewallService {
         Ok(parsed.to_string())
     }
 
+    #[allow(dead_code)] // will be used by CIDR rules in firewall phase
     /// مثل validate_ip، اما CIDR (مثل 192.168.1.0/24) را هم قبول می‌کند.
     fn validate_ip_or_cidr(value: &str) -> FirewallResult<String> {
         let v = value.trim();

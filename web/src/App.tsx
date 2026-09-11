@@ -4,16 +4,16 @@ import { RequireAuth } from './components/RequireAuth'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 
-import { FirewallRules } from './pages/firewall/Rules'
-import { FirewallInterfaces } from './pages/firewall/Interfaces'
+import { FirewallRules } from './pages/Firewall/Rules'
+import { FirewallInterfaces } from './pages/Firewall/Interfaces'
 import { RoutingPage } from './pages/routing/Index'
-import { IdentitiesPage } from './pages/identity/Identities'
-import { SessionsPage } from './pages/identity/Sessions'
+import { IdentitiesPage } from './pages/Identity/Identities'
+import { SessionsPage } from './pages/Identity/Sessions'
 import { UsersPage } from './pages/system/Users'
 import { ModulesPage } from './pages/services/Modules'
 import { CoreServicesPage } from './pages/services/CoreServices'
 import { ConsolePage } from './pages/diagnostics/Console'
-import Accounting from './identity/Accounting.tsx'
+import Accounting from './pages/Identity/Accounting'
 
 import './styles/global.css'
 import './components/Layout.css'
@@ -36,7 +36,7 @@ export default function App() {
 
             <Route path="/identities" element={<IdentitiesPage />} />
             <Route path="/identities/sessions" element={<SessionsPage />} />
-            <Route path="/identity/Accounting" element={<Accounting />} />
+            <Route path="/identity/accounting" element={<Accounting />} />
 
             <Route path="/users" element={<UsersPage />} />
 

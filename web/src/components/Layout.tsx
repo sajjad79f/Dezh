@@ -7,7 +7,6 @@ import {
   Network,
   Users,
   Boxes,
-  Server,
   Terminal,
   ChevronDown,
   LogOut,
@@ -39,6 +38,7 @@ const nav: NavItem[] = [
     children: [
       { to: '/identities', label: 'Identities' },
       { to: '/identities/sessions', label: 'Sessions' },
+      { to: '/identity/accounting', label: 'Accounting' },
     ],
   },
   {

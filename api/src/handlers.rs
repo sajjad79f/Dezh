@@ -24,7 +24,6 @@ use storage::{SessionRepo, UserRepo, AccountingRepo, AuditRepo, DbPool, Identity
 use crate::auth::{generate_token, AuthUser};
 use uuid::Uuid;
 use crate::dto::{
-    AccountingSessionDto,
     CreateIdentityRequest,
     AgentUserActiveRequest,
     AgentUserInactiveRequest,
@@ -1248,7 +1247,7 @@ pub async fn update_identity(
     Json(req): Json<UpdateIdentityRequest>,
 ) -> impl IntoResponse {
     // فقط ادمین — اگر نام فیلد نقش در AuthUser شما فرق دارد، با الگوی create_user هماهنگ کن
-    if user.role != "admin" {
+    if user.0.role != "admin" {
         return (
             StatusCode::FORBIDDEN,
             Json(ErrorDto {

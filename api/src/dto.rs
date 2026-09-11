@@ -127,22 +127,11 @@ fn default_source() -> String {
     "local".into()
 }
 
-#[derive(Serialize)]
-pub struct AccountingSessionDto {
-    pub id: String,
-    pub identity_id: Option<String>,
-    pub protocol: String,
-    pub ip_address: Option<String>,
-    pub started_at: String,
-    pub ended_at: Option<String>,
-    pub bytes_in: i64,
-    pub bytes_out: i64,
-}
-
 #[derive(Deserialize)]
 pub struct StartSessionRequest {
     pub identity_id: Option<String>,
     pub protocol: String, // vpn | nac | portal | other
+    #[allow(dead_code)]
     pub ip_address: Option<String>,
 }
 
@@ -162,12 +151,14 @@ pub struct AgentUserActiveRequest {
     pub hostname: Option<String>,
     pub ip_address: Option<String>,
     pub os: Option<String>,
+    #[allow(dead_code)]
     pub agent_id: Option<String>,
 }
 
 #[derive(Deserialize)]
 pub struct AgentUserInactiveRequest {
     pub username: String,
+    #[allow(dead_code)]
     pub ip_address: Option<String>,
     #[serde(default)]
     pub bytes_in: i64,

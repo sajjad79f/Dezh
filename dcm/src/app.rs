@@ -30,15 +30,17 @@ impl Application {
     }
 
     pub async fn run(mut self) {
-        if let Err(e) = storage::run_migrations(pool.inner()).await {
-            eprintln!("[dcm] migration failed: {e}");
-            // اگر تابع Result برمی‌گرداند، بهتر است اینجا return Err کنی —
-            // سیستم بدون اسکیما نباید بالا بیاید
-        }
         let db_config = DatabaseConfig::from_env();
         match create_pool(&db_config).await {
             Ok(pool) => {
                 eprintln!("[dcm] database connected");
+
+                // Phase 0.5: automatic migrations on boot
+                if let Err(e) = storage::run_migrations(pool.inner()).await {
+                    eprintln!("[dcm] migrations failed: {e}");
+                    return; // بدون اسکیما نباید بالا بیاد
+                }
+
                 if let Err(e) = bootstrap_admin(&pool).await {
                     eprintln!("[dcm] bootstrap admin failed: {e}");
                 }
