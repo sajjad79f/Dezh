@@ -62,8 +62,18 @@ pub fn router(state: AppState) -> Router {
         .route("/api/firewall/interfaces", get(handlers::list_interfaces))
         .route("/api/firewall/interfaces/zone", post(handlers::set_interface_zone))
         .route(
+            "/api/firewall/nat",
+            get(handlers::list_nat_rules).post(handlers::create_nat_rule),
+        )
+        .route(
+            "/api/firewall/nat/{id}",
+            delete(handlers::delete_nat_rule),
+        )
+        .route(
             "/api/routing/routes",
-            get(handlers::list_routes).post(handlers::add_route),
+            get(handlers::list_routes)
+                .post(handlers::add_route)
+                .delete(handlers::delete_route),
         )
         .route(
             "/api/routing/default",

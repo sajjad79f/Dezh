@@ -14,6 +14,7 @@ import { ModulesPage } from './pages/services/Modules'
 import { CoreServicesPage } from './pages/services/CoreServices'
 import { ConsolePage } from './pages/diagnostics/Console'
 import Accounting from './pages/Identity/Accounting'
+import { FirewallNat } from './pages/Firewall/Nat'
 
 import './styles/global.css'
 import './components/Layout.css'
@@ -31,6 +32,7 @@ export default function App() {
             <Route path="/firewall" element={<Navigate to="/firewall/rules" replace />} />
             <Route path="/firewall/rules" element={<FirewallRules />} />
             <Route path="/firewall/interfaces" element={<FirewallInterfaces />} />
+            <Route path="/firewall/nat" element={<FirewallNat />} />
 
             <Route path="/routing" element={<RoutingPage />} />
 

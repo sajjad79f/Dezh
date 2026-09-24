@@ -10,7 +10,37 @@ impl RoutingService {
         Self
     }
 
+    /// اول `sudo -n ip` (بدون پسورد)، اگر نشد خود `ip`.
+    /// برای NGFW روی Debian معمولاً باید dcm با root اجرا شود
+    /// یا در sudoers خط NOPASSWD برای /sbin/ip تعریف شود.
     fn run_ip(args: &[&str]) -> RoutingResult<String> {
+        // try: sudo -n ip ...
+        let sudo = Command::new("sudo")
+            .arg("-n")
+            .arg("ip")
+            .args(args)
+            .output();
+
+        if let Ok(output) = sudo {
+            if output.status.success() {
+                return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
+            }
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            // اگر sudo اصلاً اجازه نداشت، برو سراغ ip مستقیم
+            if !err.contains("password is required")
+                && !err.contains("a password is required")
+                && !err.contains("not allowed")
+                && !err.is_empty()
+                && output.status.code() != Some(1)
+            {
+                // خطای واقعی از ip (مثلاً route تکراری)
+                if err.contains("RTNETLINK") || err.contains("File exists") || err.contains("No such")
+                {
+                    return Err(RoutingError::Internal(err));
+                }
+            }
+        }
+
         let output = Command::new("ip")
             .args(args)
             .output()
@@ -19,9 +49,13 @@ impl RoutingService {
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
         } else {
-            Err(RoutingError::Internal(
-                String::from_utf8_lossy(&output.stderr).trim().to_string(),
-            ))
+            let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            if err.contains("Operation not permitted") {
+                return Err(RoutingError::Internal(
+                    "Operation not permitted — Dezh must run as root (or grant CAP_NET_ADMIN / sudo NOPASSWD for /sbin/ip)".into(),
+                ));
+            }
+            Err(RoutingError::Internal(err))
         }
     }
 
@@ -89,15 +123,24 @@ impl RoutingService {
         if destination.trim().is_empty() {
             return Err(RoutingError::Invalid("destination required".into()));
         }
+        if gateway.is_none() && device.is_none() {
+            return Err(RoutingError::Invalid(
+                "at least gateway or device is required".into(),
+            ));
+        }
 
         let mut args = vec!["route", "add", destination];
         if let Some(gw) = gateway {
-            args.push("via");
-            args.push(gw);
+            if !gw.is_empty() {
+                args.push("via");
+                args.push(gw);
+            }
         }
         if let Some(dev) = device {
-            args.push("dev");
-            args.push(dev);
+            if !dev.is_empty() {
+                args.push("dev");
+                args.push(dev);
+            }
         }
 
         Self::run_ip(&args)?;
@@ -112,25 +155,30 @@ impl RoutingService {
     ) -> RoutingResult<()> {
         let mut args = vec!["route", "del", destination];
         if let Some(gw) = gateway {
-            args.push("via");
-            args.push(gw);
+            if !gw.is_empty() {
+                args.push("via");
+                args.push(gw);
+            }
         }
         if let Some(dev) = device {
-            args.push("dev");
-            args.push(dev);
+            if !dev.is_empty() {
+                args.push("dev");
+                args.push(dev);
+            }
         }
         Self::run_ip(&args)?;
         Ok(())
     }
 
     pub fn set_default_gateway(&self, gateway: &str, device: Option<&str>) -> RoutingResult<()> {
-        // حذف default قبلی (اگر بود) — خطا را نادیده بگیر
         let _ = Self::run_ip(&["route", "del", "default"]);
 
         let mut args = vec!["route", "add", "default", "via", gateway];
         if let Some(dev) = device {
-            args.push("dev");
-            args.push(dev);
+            if !dev.is_empty() {
+                args.push("dev");
+                args.push(dev);
+            }
         }
         Self::run_ip(&args)?;
         Ok(())

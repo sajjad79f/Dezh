@@ -221,3 +221,46 @@ pub struct UsageQuery {
 pub struct UpdateIdentityRequest {
     pub enabled: bool,
 }
+
+#[derive(Deserialize)]
+pub struct DeleteRouteRequest {
+    pub destination: String,
+    pub gateway: Option<String>,
+    pub device: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct NatRuleDto {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+    pub kind: String,
+    pub interface: String,
+    pub source: String,
+    pub destination: String,
+    pub protocol: String,
+    pub dest_port: Option<u16>,
+    pub target: Option<String>,
+    pub description: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateNatRuleRequest {
+    pub name: String,
+    pub kind: String,              // masquerade | dnat
+    pub interface: String,
+    #[serde(default = "default_any")]
+    pub source: String,
+    #[serde(default = "default_any")]
+    pub destination: String,
+    #[serde(default = "default_any")]
+    pub protocol: String,
+    pub dest_port: Option<u16>,
+    pub target: Option<String>,
+    #[serde(default)]
+    pub description: String,
+}
+
+fn default_any() -> String {
+    "any".into()
+}

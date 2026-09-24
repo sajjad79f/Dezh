@@ -50,7 +50,10 @@ use crate::dto::{
     ModuleDto,
     HistoryQuery,
     UsageQuery,
-    UpdateIdentityRequest
+    UpdateIdentityRequest,
+    DeleteRouteRequest,
+    NatRuleDto,
+    CreateNatRuleRequest,
 };
 
 pub async fn console() -> Html<&'static str> {
@@ -955,6 +958,37 @@ pub async fn add_route(
     }
 }
 
+pub async fn delete_route(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<DeleteRouteRequest>,
+) -> impl IntoResponse {
+    let Some(rt) = state.services.resolve::<RoutingService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "routing unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match rt.delete_route(
+        &req.destination,
+        req.gateway.as_deref(),
+        req.device.as_deref(),
+    ) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 pub async fn set_default_gateway(
     _user: AuthUser,
     State(state): State<AppState>,
@@ -1284,6 +1318,114 @@ pub async fn update_identity(
             Json(ErrorDto {
                 error: e.to_string(),
             }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn list_nat_rules(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto { error: "firewall unavailable".into() }),
+        )
+            .into_response();
+    };
+
+    match fw.list_nat_rules() {
+        Ok(rows) => {
+            let list: Vec<NatRuleDto> = rows
+                .into_iter()
+                .map(|r| NatRuleDto {
+                    id: r.id.to_string(),
+                    name: r.name,
+                    enabled: r.enabled,
+                    kind: r.kind,
+                    interface: r.interface,
+                    source: r.source,
+                    destination: r.destination,
+                    protocol: r.protocol,
+                    dest_port: r.dest_port.map(|p| p as u16),
+                    target: r.target,
+                    description: r.description,
+                })
+                .collect();
+            (StatusCode::OK, Json(list)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto { error: e.to_string() }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn create_nat_rule(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<CreateNatRuleRequest>,
+) -> impl IntoResponse {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto { error: "firewall unavailable".into() }),
+        )
+            .into_response();
+    };
+
+    match fw.add_nat_rule(
+        &req.name,
+        &req.kind,
+        &req.interface,
+        &req.source,
+        &req.destination,
+        &req.protocol,
+        req.dest_port,
+        req.target.as_deref(),
+        &req.description,
+    ) {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "id": id.to_string() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto { error: e.to_string() }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn delete_nat_rule(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let Ok(uuid) = Uuid::parse_str(&id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto { error: "invalid id".into() }),
+        )
+            .into_response();
+    };
+
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto { error: "firewall unavailable".into() }),
+        )
+            .into_response();
+    };
+
+    match fw.remove_nat_rule(uuid) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorDto { error: e.to_string() }),
         )
             .into_response(),
     }

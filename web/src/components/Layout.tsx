@@ -29,6 +29,7 @@ const nav: NavItem[] = [
     children: [
       { to: '/firewall/rules', label: 'Rules' },
       { to: '/firewall/interfaces', label: 'Interfaces / Zones' },
+      { to: '/firewall/nat', label: 'NAT' },
     ],
   },
   { to: '/routing', icon: Route, label: 'Routing' },

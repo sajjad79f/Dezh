@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
-use storage::{DbPool, FirewallRepo, FirewallRuleRow, InterfaceRepo};
+use storage::{DbPool, FirewallRepo, FirewallRuleRow, InterfaceRepo, NatRepo, NatRuleRow};
 
 use crate::error::{FirewallError, FirewallResult};
 use crate::models::{FirewallRule, InterfaceInfo, Protocol, RuleAction, RuleDirection, Zone};
@@ -33,10 +33,13 @@ impl FirewallService {
         if let Err(e) = self.load_zones_from_db(&pool) {
             eprintln!("[firewall] load zones from db failed: {e}");
         }
+        *self.pool.write().expect("firewall pool lock") = Some(pool);
         if let Err(e) = self.apply_rules() {
             eprintln!("[firewall] apply_rules on attach failed: {e}");
         }
-        *self.pool.write().expect("firewall pool lock") = Some(pool);
+        if let Err(e) = self.apply_nat() {
+            eprintln!("[firewall] apply_nat on attach failed: {e}");
+        }
         eprintln!("[firewall] persistence attached");
     }
 
@@ -540,6 +543,175 @@ impl FirewallService {
 
         eprintln!(
             "[firewall] applied {} enabled rule(s) to nftables",
+            rules.iter().filter(|r| r.enabled).count()
+        );
+        Ok(())
+    }
+        // ─── NAT ───────────────────────────────────────────
+
+    pub fn list_nat_rules(&self) -> FirewallResult<Vec<NatRuleRow>> {
+        let pool = self
+            .pool
+            .read()
+            .expect("firewall pool lock")
+            .clone()
+            .ok_or_else(|| FirewallError::Internal("database not attached".into()))?;
+        let repo = NatRepo::new(pool.inner());
+        Self::block_on(repo.list()).map_err(|e| FirewallError::Internal(e.to_string()))
+    }
+
+    pub fn add_nat_rule(
+        &self,
+        name: &str,
+        kind: &str,
+        interface: &str,
+        source: &str,
+        destination: &str,
+        protocol: &str,
+        dest_port: Option<u16>,
+        target: Option<&str>,
+        description: &str,
+    ) -> FirewallResult<Uuid> {
+        let kind = kind.trim().to_lowercase();
+        if kind != "masquerade" && kind != "dnat" {
+            return Err(FirewallError::Internal("kind must be masquerade or dnat".into()));
+        }
+        if interface.trim().is_empty() {
+            return Err(FirewallError::Internal("interface required".into()));
+        }
+        if kind == "dnat" && target.map(|t| t.trim().is_empty()).unwrap_or(true) {
+            return Err(FirewallError::Internal("dnat requires target (IP or IP:port)".into()));
+        }
+
+        let id = Uuid::new_v4();
+        let row = NatRuleRow {
+            id,
+            name: name.trim().to_string(),
+            enabled: true,
+            kind,
+            interface: interface.trim().to_string(),
+            source: if source.trim().is_empty() { "any".into() } else { source.trim().into() },
+            destination: if destination.trim().is_empty() { "any".into() } else { destination.trim().into() },
+            protocol: protocol.trim().to_lowercase(),
+            dest_port: dest_port.map(|p| p as i32),
+            target: target.map(|t| t.trim().to_string()).filter(|s| !s.is_empty()),
+            description: description.to_string(),
+        };
+
+        let pool = self
+            .pool
+            .read()
+            .expect("firewall pool lock")
+            .clone()
+            .ok_or_else(|| FirewallError::Internal("database not attached".into()))?;
+        let repo = NatRepo::new(pool.inner());
+        Self::block_on(repo.insert(&row)).map_err(|e| FirewallError::Internal(e.to_string()))?;
+
+        if let Err(e) = self.apply_nat() {
+            eprintln!("[firewall] apply_nat after add failed: {e}");
+        }
+        Ok(id)
+    }
+
+    pub fn remove_nat_rule(&self, id: Uuid) -> FirewallResult<()> {
+        let pool = self
+            .pool
+            .read()
+            .expect("firewall pool lock")
+            .clone()
+            .ok_or_else(|| FirewallError::Internal("database not attached".into()))?;
+        let repo = NatRepo::new(pool.inner());
+        Self::block_on(repo.delete(id)).map_err(|e| FirewallError::Internal(e.to_string()))?;
+        if let Err(e) = self.apply_nat() {
+            eprintln!("[firewall] apply_nat after remove failed: {e}");
+        }
+        Ok(())
+    }
+
+    fn ensure_nat_base(&self) -> FirewallResult<()> {
+        let _ = Self::run_nft(&["add", "table", "ip", "dezh_nat"]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "ip", "dezh_nat", "prerouting",
+            "{", "type", "nat", "hook", "prerouting", "priority", "dstnat", ";", "}",
+        ]);
+        let _ = Self::run_nft(&[
+            "add", "chain", "ip", "dezh_nat", "postrouting",
+            "{", "type", "nat", "hook", "postrouting", "priority", "srcnat", ";", "}",
+        ]);
+        Ok(())
+    }
+
+    fn flush_nat_chains(&self) -> FirewallResult<()> {
+        let _ = Self::run_nft(&["flush", "chain", "ip", "dezh_nat", "prerouting"]);
+        let _ = Self::run_nft(&["flush", "chain", "ip", "dezh_nat", "postrouting"]);
+        Ok(())
+    }
+
+    /// IP forwarding لازم برای NAT
+    fn enable_ip_forward() {
+        let _ = std::fs::write("/proc/sys/net/ipv4/ip_forward", "1");
+    }
+
+    pub fn apply_nat(&self) -> FirewallResult<()> {
+        Self::enable_ip_forward();
+        self.ensure_nat_base()?;
+        self.flush_nat_chains()?;
+
+        let rules = match self.list_nat_rules() {
+            Ok(r) => r,
+            Err(_) => return Ok(()), // هنوز DB attach نشده
+        };
+
+        for rule in rules.iter().filter(|r| r.enabled) {
+            match rule.kind.as_str() {
+                "masquerade" => {
+                    let mut args: Vec<String> = vec![
+                        "add".into(), "rule".into(), "ip".into(), "dezh_nat".into(),
+                        "postrouting".into(),
+                        "oifname".into(), rule.interface.clone(),
+                    ];
+                    if rule.source != "any" {
+                        args.push("ip".into());
+                        args.push("saddr".into());
+                        args.push(rule.source.clone());
+                    }
+                    args.push("masquerade".into());
+                    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                    Self::run_nft(&refs)?;
+                }
+                "dnat" => {
+                    let target = rule.target.as_deref().unwrap_or("");
+                    if target.is_empty() {
+                        continue;
+                    }
+                    let mut args: Vec<String> = vec![
+                        "add".into(), "rule".into(), "ip".into(), "dezh_nat".into(),
+                        "prerouting".into(),
+                        "iifname".into(), rule.interface.clone(),
+                    ];
+                    if rule.destination != "any" {
+                        args.push("ip".into());
+                        args.push("daddr".into());
+                        args.push(rule.destination.clone());
+                    }
+                    let proto = rule.protocol.as_str();
+                    if (proto == "tcp" || proto == "udp") && rule.dest_port.is_some() {
+                        args.push(proto.into());
+                        args.push("dport".into());
+                        args.push(rule.dest_port.unwrap().to_string());
+                    }
+                    args.push("dnat".into());
+                    args.push("to".into());
+                    args.push(target.to_string());
+                    let refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                    Self::run_nft(&refs)?;
+                }
+                _ => {}
+            }
+        }
+
+        eprintln!(
+            "[firewall] applied {} enabled NAT rule(s)",
             rules.iter().filter(|r| r.enabled).count()
         );
         Ok(())

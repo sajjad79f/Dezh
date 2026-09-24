@@ -74,3 +74,79 @@ impl<'a> FirewallRepo<'a> {
         Ok(())
     }
 }
+
+// ─── NAT ───────────────────────────────────────────────
+
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct NatRuleRow {
+    pub id: Uuid,
+    pub name: String,
+    pub enabled: bool,
+    pub kind: String,
+    pub interface: String,
+    pub source: String,
+    pub destination: String,
+    pub protocol: String,
+    pub dest_port: Option<i32>,
+    pub target: Option<String>,
+    pub description: String,
+}
+
+pub struct NatRepo<'a> {
+    pool: &'a PgPool,
+}
+
+impl<'a> NatRepo<'a> {
+    pub fn new(pool: &'a PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn insert(&self, r: &NatRuleRow) -> StorageResult<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO nat_rules
+              (id, name, enabled, kind, interface, source, destination, protocol, dest_port, target, description)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+            "#,
+        )
+        .bind(r.id)
+        .bind(&r.name)
+        .bind(r.enabled)
+        .bind(&r.kind)
+        .bind(&r.interface)
+        .bind(&r.source)
+        .bind(&r.destination)
+        .bind(&r.protocol)
+        .bind(r.dest_port)
+        .bind(&r.target)
+        .bind(&r.description)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn list(&self) -> StorageResult<Vec<NatRuleRow>> {
+        let rows = sqlx::query_as::<_, NatRuleRow>(
+            r#"
+            SELECT id, name, enabled, kind, interface, source, destination,
+                   protocol, dest_port, target, description
+            FROM nat_rules
+            ORDER BY kind, name
+            "#,
+        )
+        .fetch_all(self.pool)
+        .await?;
+        Ok(rows)
+    }
+
+    pub async fn delete(&self, id: Uuid) -> StorageResult<()> {
+        let result = sqlx::query(r#"DELETE FROM nat_rules WHERE id = $1"#)
+            .bind(id)
+            .execute(self.pool)
+            .await?;
+        if result.rows_affected() == 0 {
+            return Err(StorageError::NotFound(id.to_string()));
+        }
+        Ok(())
+    }
+}
