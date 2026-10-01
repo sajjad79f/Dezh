@@ -59,8 +59,6 @@ pub fn router(state: AppState) -> Router {
         .route("/api/identities/{id}", patch(handlers::update_identity))
         .route("/api/agent/user-active", post(handlers::agent_user_active))
         .route("/api/agent/user-inactive", post(handlers::agent_user_inactive))
-        .route("/api/firewall/interfaces", get(handlers::list_interfaces))
-        .route("/api/firewall/interfaces/zone", post(handlers::set_interface_zone))
         .route(
             "/api/firewall/nat",
             get(handlers::list_nat_rules).post(handlers::create_nat_rule),
@@ -78,6 +76,26 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/routing/default",
             post(handlers::set_default_gateway),
+        )
+        .route(
+            "/api/network/zones",
+            get(handlers::list_zones).post(handlers::create_zone),
+        )
+        .route(
+            "/api/network/zones/{name}",
+            patch(handlers::update_zone).delete(handlers::delete_zone),
+        )
+        .route(
+            "/api/network/interfaces",
+            get(handlers::list_network_interfaces),
+        )
+        .route(
+            "/api/network/interfaces/zone",
+            post(handlers::set_network_zone),
+        )
+        .route(
+            "/api/network/interfaces/config",
+            post(handlers::apply_interface_config),
         )
         
         .layer(cors)

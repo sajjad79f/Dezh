@@ -234,15 +234,30 @@ impl FirewallService {
     /// matches these rules, on purpose (that's the whole point: usage
     /// should count internet traffic, not internal traffic). Returns
     /// an error if no interface is currently assigned the `Wan` zone.
+    /// سازگاری با کد قبلی: اولین اینترفیس را caller باید بدهد
+    /// ترجیحاً از NetworkService::primary_accounting_interface() استفاده کن
     pub fn start_accounting(&self, session_id: Uuid, ip: &str) -> FirewallResult<()> {
-        // فقط IP معتبر؛ رشته مشکوک همان‌جا با خطا رد می‌شود
-        let ip = Self::validate_ip(ip)?;
-
         let Some(wan) = self.wan_interface() else {
             return Err(FirewallError::Internal(
-                "no interface is assigned the 'wan' zone yet".into(),
+                "no accounting interface (set a zone with accounting=true and assign an interface)"
+                    .into(),
             ));
         };
+        self.start_accounting_on(session_id, ip, &wan)
+    }
+
+    /// شمارش ترافیک روی اینترفیس مشخص (از network / zone.accounting)
+    pub fn start_accounting_on(
+        &self,
+        session_id: Uuid,
+        ip: &str,
+        iface: &str,
+    ) -> FirewallResult<()> {
+        Self::validate_ip(ip)?;
+        let iface = iface.trim();
+        if iface.is_empty() {
+            return Err(FirewallError::Internal("interface name required".into()));
+        }
 
         self.ensure_accounting_base()?;
 
@@ -252,16 +267,38 @@ impl FirewallService {
         Self::run_nft(&["add", "counter", "inet", "accounting", &in_name])?;
         Self::run_nft(&["add", "counter", "inet", "accounting", &out_name])?;
 
-        // Inbound: comes IN through the WAN interface, destined for this IP.
+        // Inbound: از این اینترفیس می‌آید به سمت IP کلاینت
         Self::run_nft(&[
-            "add", "rule", "inet", "accounting", "forward",
-            "iifname", &wan, "ip", "daddr", &ip, "counter", "name", &in_name,
+            "add",
+            "rule",
+            "inet",
+            "accounting",
+            "forward",
+            "iifname",
+            iface,
+            "ip",
+            "daddr",
+            ip,
+            "counter",
+            "name",
+            &in_name,
         ])?;
 
-        // Outbound: leaves OUT through the WAN interface, sourced from this IP.
+        // Outbound: از IP کلاینت از این اینترفیس خارج می‌شود
         Self::run_nft(&[
-            "add", "rule", "inet", "accounting", "forward",
-            "oifname", &wan, "ip", "saddr", &ip, "counter", "name", &out_name,
+            "add",
+            "rule",
+            "inet",
+            "accounting",
+            "forward",
+            "oifname",
+            iface,
+            "ip",
+            "saddr",
+            ip,
+            "counter",
+            "name",
+            &out_name,
         ])?;
 
         Ok(())

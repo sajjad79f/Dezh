@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 
+use network::NetworkService;
 use firewall::{
     FirewallService,
     Protocol,
@@ -54,6 +55,12 @@ use crate::dto::{
     DeleteRouteRequest,
     NatRuleDto,
     CreateNatRuleRequest,
+    ZoneDto,
+    CreateZoneRequest,
+    UpdateZoneRequest,
+    NetworkInterfaceDto,
+    SetNetworkZoneRequest,
+    InterfaceConfigRequest,
 };
 
 pub async fn console() -> Html<&'static str> {
@@ -1426,6 +1433,243 @@ pub async fn delete_nat_rule(
         Err(e) => (
             StatusCode::NOT_FOUND,
             Json(ErrorDto { error: e.to_string() }),
+        )
+            .into_response(),
+    }
+}
+
+// ─── Network: Zones ────────────────────────────────────
+
+pub async fn list_zones(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.list_zones() {
+        Ok(list) => {
+            let dtos: Vec<ZoneDto> = list
+                .into_iter()
+                .map(|z| ZoneDto {
+                    id: z.id,
+                    name: z.name,
+                    display_name: z.display_name,
+                    accounting: z.accounting,
+                    description: z.description,
+                })
+                .collect();
+            (StatusCode::OK, Json(dtos)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn create_zone(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<CreateZoneRequest>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.create_zone(
+        &req.name,
+        &req.display_name,
+        req.accounting,
+        &req.description,
+    ) {
+        Ok(id) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "id": id.to_string() })),
+        )
+            .into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn update_zone(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<UpdateZoneRequest>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.update_zone(&name, &req.display_name, req.accounting, &req.description) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn delete_zone(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.delete_zone(&name) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+// ─── Network: Interfaces ───────────────────────────────
+
+pub async fn list_network_interfaces(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.list_interfaces() {
+        Ok(list) => {
+            let dtos: Vec<NetworkInterfaceDto> = list
+                .into_iter()
+                .map(|i| NetworkInterfaceDto {
+                    name: i.name,
+                    zone: i.zone,
+                    up: i.up,
+                    addresses: i.addresses,
+                    enabled: i.enabled,
+                    ipv4_mode: i.ipv4_mode,
+                    address_cidr: i.address_cidr,
+                    gateway: i.gateway,
+                    description: i.description,
+                })
+                .collect();
+            (StatusCode::OK, Json(dtos)).into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn set_network_zone(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<SetNetworkZoneRequest>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.set_zone(req.name.trim(), req.zone.trim()) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn apply_interface_config(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<InterfaceConfigRequest>,
+) -> impl IntoResponse {
+    let Some(net) = state.services.resolve::<NetworkService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "network unavailable".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match net.apply_interface_config(
+        req.name.trim(),
+        req.zone.trim(),
+        req.enabled,
+        req.ipv4_mode.trim(),
+        req.address_cidr.as_deref(),
+        req.gateway.as_deref(),
+        &req.description,
+    ) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
         )
             .into_response(),
     }

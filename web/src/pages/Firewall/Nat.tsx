@@ -1,5 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { getToken } from '../../api/auth'
+import { authHeaders, readJson, readEmpty } from '../../api/http'
 
 interface NatRule {
   id: string
@@ -48,13 +49,12 @@ export function FirewallNat() {
   async function load() {
     try {
       const [n, i] = await Promise.all([
-        fetch('/api/firewall/nat', { headers: headers() }),
-        fetch('/api/firewall/interfaces', { headers: headers() }),
+        fetch('/api/firewall/nat', { headers: authHeaders() }),
+        fetch('/api/network/interfaces', { headers: authHeaders() }),
+        // اگر هنوز /api/firewall/interfaces است همان را بگذار
       ])
-      if (!n.ok) throw new Error((await n.json()).error || n.statusText)
-      if (!i.ok) throw new Error((await i.json()).error || i.statusText)
-      setRules(await n.json())
-      setIfaces(await i.json())
+      setRules(await readJson(n))
+      setIfaces(await readJson(i))
       setError(null)
     } catch (e: any) {
       setError(e.message)
@@ -68,42 +68,46 @@ export function FirewallNat() {
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     setOk(null)
-    const body: Record<string, unknown> = {
-      name: name || (kind === 'masquerade' ? 'Outbound NAT' : 'Port forward'),
-      kind,
-      interface: iface,
-      source: source || 'any',
-      destination: 'any',
-      protocol: kind === 'dnat' ? protocol : 'any',
-      dest_port: kind === 'dnat' && destPort ? Number(destPort) : null,
-      target: kind === 'dnat' ? target : null,
-      description,
+    try {
+      const res = await fetch('/api/firewall/nat', {
+        method: 'POST',
+        headers: authHeaders(true),
+        body: JSON.stringify({
+          name: name || (kind === 'masquerade' ? 'Outbound NAT' : 'Port forward'),
+          kind,
+          interface: iface,
+          source: source || 'any',
+          destination: 'any',
+          protocol: kind === 'dnat' ? protocol : 'any',
+          dest_port: kind === 'dnat' && destPort ? Number(destPort) : null,
+          target: kind === 'dnat' ? target : null,
+          description,
+        }),
+      })
+      if (res.status === 201) {
+        await readJson(res)
+      } else {
+        await readEmpty(res)
+      }
+      setName('')
+      setTarget('')
+      setDestPort('')
+      setDescription('')
+      setOk('NAT rule applied')
+      setError(null)
+      await load()
+    } catch (e: any) {
+      setError(e.message)
     }
-    const res = await fetch('/api/firewall/nat', {
-      method: 'POST',
-      headers: headers(true),
-      body: JSON.stringify(body),
-    })
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      setError(err.error || res.statusText)
-      return
-    }
-    setName('')
-    setTarget('')
-    setDestPort('')
-    setDescription('')
-    setOk('NAT rule applied')
-    setError(null)
-    await load()
   }
 
   async function onDelete(id: string) {
     if (!confirm('Delete this NAT rule?')) return
-    const res = await fetch(`/api/firewall/nat/${id}`, {
-      method: 'DELETE',
-      headers: headers(),
-    })
+      const res = await fetch(`/api/firewall/nat/${id}`, {
+        method: 'DELETE',
+        headers: authHeaders(),
+      })
+      await readEmpty(res)
     if (!res.ok && res.status !== 204) {
       const err = await res.json().catch(() => ({ error: res.statusText }))
       setError(err.error || res.statusText)

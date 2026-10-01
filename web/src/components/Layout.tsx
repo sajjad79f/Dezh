@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard,
+  Cable,
   Shield,
   Route,
   Network,
@@ -23,13 +24,20 @@ type NavItem = {
 
 const nav: NavItem[] = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
+    {
+    icon: Cable, // از lucide-react — اگر نبود: Cable یا Globe
+    label: 'Network',
+    children: [
+      { to: '/network/interfaces', label: 'Interfaces' },
+      { to: '/network/zones', label: 'Zones' },
+    ],
+  },
   {
     icon: Shield,
     label: 'Firewall',
     children: [
       { to: '/firewall/rules', label: 'Rules' },
-      { to: '/firewall/interfaces', label: 'Interfaces / Zones' },
-      { to: '/firewall/nat', label: 'NAT' },
+      { to: '/firewall/nat', label: 'NAT' }, // اگر NAT داری
     ],
   },
   { to: '/routing', icon: Route, label: 'Routing' },

@@ -28,6 +28,7 @@ members = [
     "modules/ips",
     "modules/routing",
     "modules/accounting",
+    "modules/network",
 
     "agents/windows-agent",
     "agents/linux-agent",

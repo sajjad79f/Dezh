@@ -4,8 +4,9 @@ import { RequireAuth } from './components/RequireAuth'
 import { Login } from './pages/Login'
 import { Dashboard } from './pages/Dashboard'
 
+import { NetworkInterfaces } from './pages/network/Interfaces'
+import { NetworkZones } from './pages/network/Zones'
 import { FirewallRules } from './pages/Firewall/Rules'
-import { FirewallInterfaces } from './pages/Firewall/Interfaces'
 import { RoutingPage } from './pages/routing/Index'
 import { IdentitiesPage } from './pages/Identity/Identities'
 import { SessionsPage } from './pages/Identity/Sessions'
@@ -29,9 +30,11 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
 
+            <Route path="/network/interfaces" element={<NetworkInterfaces />} />
+            <Route path="/network/zones" element={<NetworkZones />} />
+
             <Route path="/firewall" element={<Navigate to="/firewall/rules" replace />} />
             <Route path="/firewall/rules" element={<FirewallRules />} />
-            <Route path="/firewall/interfaces" element={<FirewallInterfaces />} />
             <Route path="/firewall/nat" element={<FirewallNat />} />
 
             <Route path="/routing" element={<RoutingPage />} />

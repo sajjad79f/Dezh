@@ -264,3 +264,61 @@ pub struct CreateNatRuleRequest {
 fn default_any() -> String {
     "any".into()
 }
+
+#[derive(Serialize)]
+pub struct ZoneDto {
+    pub id: String,
+    pub name: String,
+    pub display_name: String,
+    pub accounting: bool,
+    pub description: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateZoneRequest {
+    pub name: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub accounting: bool,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateZoneRequest {
+    pub display_name: String,
+    pub accounting: bool,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Serialize)]
+pub struct NetworkInterfaceDto {
+    pub name: String,
+    pub zone: String,
+    pub up: bool,
+    pub addresses: Vec<String>,
+    pub enabled: bool,
+    pub ipv4_mode: String,
+    pub address_cidr: Option<String>,
+    pub gateway: Option<String>,
+    pub description: String,
+}
+
+#[derive(Deserialize)]
+pub struct SetNetworkZoneRequest {
+    pub name: String,
+    pub zone: String,
+}
+
+#[derive(Deserialize)]
+pub struct InterfaceConfigRequest {
+    pub name: String,
+    pub zone: String,
+    pub enabled: bool,
+    pub ipv4_mode: String, // none | static | dhcp
+    pub address_cidr: Option<String>,
+    pub gateway: Option<String>,
+    #[serde(default)]
+    pub description: String,
+}

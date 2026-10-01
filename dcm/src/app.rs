@@ -65,6 +65,9 @@ impl Application {
                 if let Some(fw) = self.services.resolve::<firewall::FirewallService>() {
                     acc.attach_firewall((*fw).clone());
                 }
+                if let Some(net) = self.services.resolve::<network::NetworkService>() {
+                    net.attach_pool((*pool).clone());
+                }
             }
         }
 

@@ -10,6 +10,7 @@ shared-kernel = { path = "../shared-kernel" }
 contracts = { path = "../contracts" }
 storage = { path = "../storage" }
 
+network = { path = "../modules/network" }
 firewall = { path = "../modules/firewall" }
 routing = { path = "../modules/routing" }
 accounting = { path = "../modules/accounting" }

@@ -10,6 +10,9 @@ pub enum StorageError {
 
     #[error("configuration error: {0}")]
     Config(String),
+    
+    #[error("{0}")]
+    Message(String),
 }
 
 pub type StorageResult<T> = Result<T, StorageError>;

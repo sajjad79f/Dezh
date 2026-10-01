@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 
+use network::NetworkService;
 use firewall::FirewallService;
 use storage::{AccountingRepo, AuditRepo, DbPool, IdentityRepo};
 use uuid::Uuid;
@@ -8,6 +9,7 @@ use crate::error::{AccountingError, AccountingResult};
 
 pub struct AccountingService {
     pool: Arc<RwLock<Option<DbPool>>>,
+    network: Arc<RwLock<Option<NetworkService>>>,
     firewall: Arc<RwLock<Option<FirewallService>>>,
 }
 
@@ -15,6 +17,7 @@ impl AccountingService {
     pub fn new() -> Self {
         Self {
             pool: Arc::new(RwLock::new(None)),
+            network: Arc::new(RwLock::new(None)),
             firewall: Arc::new(RwLock::new(None)),
         }
     }
@@ -22,6 +25,11 @@ impl AccountingService {
     pub fn attach_pool(&self, pool: DbPool) {
         *self.pool.write().expect("accounting pool lock") = Some(pool);
         eprintln!("[accounting] database attached");
+    }
+
+    pub fn attach_network(&self, net: NetworkService) {
+        *self.network.write().expect("accounting network lock") = Some(net);
+        eprintln!("[accounting] network attached");
     }
 
     pub fn attach_firewall(&self, fw: FirewallService) {
@@ -115,14 +123,37 @@ impl AccountingService {
             .map_err(|e| AccountingError::Message(e.to_string()))?;
 
         let mut accounting_error = None;
-        if let Some(ip) = ip_address {
-            if let Some(fw) = self.firewall.read().expect("accounting fw lock").as_ref() {
-                if let Err(e) = fw.start_accounting(session_id, ip) {
-                    accounting_error = Some(e.to_string());
-                    eprintln!("[accounting] start_accounting failed: {e}");
+            if let Some(ip) = ip_address {
+                // اینترفیس از زونی که accounting=true دارد (ماژول network)
+                let iface = self
+                    .network
+                    .read()
+                    .expect("accounting network lock")
+                    .as_ref()
+                    .and_then(|net| net.primary_accounting_interface());
+
+                match iface {
+                    Some(iface) => {
+                        if let Some(fw) = self.firewall.read().expect("accounting fw lock").as_ref() {
+                            if let Err(e) = fw.start_accounting_on(session_id, ip, &iface) {
+                                accounting_error = Some(e.to_string());
+                                eprintln!(
+                                    "[accounting] start_accounting_on({iface}) failed: {e}"
+                                );
+                            } else {
+                                eprintln!(
+                                    "[accounting] counters on interface '{iface}' for {ip}"
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        eprintln!(
+                            "[accounting] no interface with accounting zone — session without nft counters"
+                        );
+                    }
                 }
             }
-        }
 
         let _ = AuditRepo::new(pool.inner())
             .log(
@@ -251,7 +282,11 @@ pub struct UserActiveOutcome {
 
 impl Default for AccountingService {
     fn default() -> Self {
-        Self::new()
+        Self {
+            pool: Arc::new(RwLock::new(None)),
+            firewall: Arc::new(RwLock::new(None)),
+            network: Arc::new(RwLock::new(None)),
+        }
     }
 }
 
@@ -260,6 +295,7 @@ impl Clone for AccountingService {
         Self {
             pool: Arc::clone(&self.pool),
             firewall: Arc::clone(&self.firewall),
+            network: Arc::clone(&self.network),
         }
     }
 }

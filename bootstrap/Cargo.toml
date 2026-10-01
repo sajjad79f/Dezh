@@ -15,6 +15,7 @@ dkg = { path = "../core/dkg" }
 die = { path = "../core/die" }
 dde = { path = "../core/dde" }
 
+network = { path = "../modules/network" }
 monitoring = { path = "../modules/monitoring" }
 firewall   = { path = "../modules/firewall" }
 vpn         = { path = "../modules/vpn" }

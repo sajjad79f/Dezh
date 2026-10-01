@@ -13,6 +13,7 @@ api = { path = "../api" }
 storage = { path = "../storage" }
 dai = { path = "../core/dai" }
 
+network = { path = "../modules/network" }
 accounting = { path = "../modules/accounting" }
 firewall = { path = "../modules/firewall" }
 

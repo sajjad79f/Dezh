@@ -4,6 +4,7 @@ use shared_kernel::prelude::*;
 use def::DefService;
 use dai::DaiService;
 
+use network::NetworkModule;
 use firewall::FirewallModule;
 use monitoring::MonitoringModule;
 use routing::RoutingModule;
@@ -23,6 +24,7 @@ pub fn register(
         .expect("DAI service not registered")
         .clone();
 
+    modules.register(NetworkModule::new());
     modules.register(FirewallModule::new());
     modules.register(RoutingModule::new());
 
