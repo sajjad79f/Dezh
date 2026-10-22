@@ -7,4 +7,8 @@ license.workspace = true
 
 [dependencies]
 contracts = { path = "../../contracts" }
+storage = { path = "../../storage" }
+
 thiserror = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true }

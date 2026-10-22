@@ -48,6 +48,8 @@ use crate::dto::{
     ExecuteCommandRequest,
     ExecuteCommandResponse,
     FirewallRuleDto,
+    DeleteFirewallRuleRequest,
+    DeleteByIdQuery,
     ModuleDto,
     HistoryQuery,
     UsageQuery,
@@ -270,6 +272,80 @@ pub async fn delete_firewall_rule(
     };
 
     let Ok(uuid) = uuid::Uuid::parse_str(&id) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: "Invalid rule id".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    match fw.remove_rule(uuid) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn delete_firewall_rule_query(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Query(q): Query<DeleteByIdQuery>,
+) -> impl IntoResponse {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "Firewall service not available".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    let Ok(uuid) = Uuid::parse_str(q.id.trim()) else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorDto {
+                error: format!("Invalid rule id: {:?}", q.id),
+            }),
+        )
+            .into_response();
+    };
+
+    match fw.remove_rule(uuid) {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(e) => (
+            StatusCode::NOT_FOUND,
+            Json(ErrorDto {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn delete_firewall_rule_by_body(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<DeleteFirewallRuleRequest>,
+) -> impl IntoResponse {
+    let Some(fw) = state.services.resolve::<FirewallService>() else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ErrorDto {
+                error: "Firewall service not available".into(),
+            }),
+        )
+            .into_response();
+    };
+
+    let Ok(uuid) = Uuid::parse_str(req.id.trim()) else {
         return (
             StatusCode::BAD_REQUEST,
             Json(ErrorDto {

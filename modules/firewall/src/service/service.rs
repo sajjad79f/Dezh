@@ -66,8 +66,17 @@ impl FirewallService {
 
         self.registry.clear();
         for row in rows {
-            let rule = row_to_rule(&row)?;
-            self.registry.add(rule);
+            match row_to_rule(&row) {
+                Ok(rule) => {
+                    self.registry.add(rule);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[firewall] skip rule id={} name={}: {e}",
+                        row.id, row.name
+                    );
+                }
+            }
         }
         Ok(())
     }
@@ -423,9 +432,26 @@ impl FirewallService {
         self.registry.get(id)
     }
 
-    pub fn remove_rule(&self, id: Uuid) -> FirewallResult<()> {
-        self.registry.remove(id)?;
-        self.persist_delete(id);
+        pub fn remove_rule(&self, id: Uuid) -> FirewallResult<()> {
+        // 1) حافظه
+        let in_memory = self.registry.remove(id).is_ok();
+
+        // 2) دیتابیس — حتی اگر در حافظه نبود
+        let mut in_db = false;
+        if let Some(pool) = self.pool.read().expect("firewall pool lock").clone() {
+            match Self::block_on(FirewallRepo::new(pool.inner()).delete(id)) {
+                Ok(()) => in_db = true,
+                Err(e) => {
+                    // NotFound از DB را نادیده بگیر اگر در حافظه بود
+                    eprintln!("[firewall] persist delete: {e}");
+                }
+            }
+        }
+
+        if !in_memory && !in_db {
+            return Err(FirewallError::RuleNotFound(id));
+        }
+
         if let Err(e) = self.apply_rules() {
             eprintln!("[firewall] apply_rules after remove failed: {e}");
         }

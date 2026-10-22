@@ -54,19 +54,32 @@ impl Application {
         self.bootstrap_app();
 
         if let Some(pool) = self.services.resolve::<storage::DbPool>() {
+            // Network اول — zone/interface برای accounting
+            if let Some(net) = self.services.resolve::<network::NetworkService>() {
+                net.attach_pool((*pool).clone());
+            }
+
             if let Some(fw) = self.services.resolve::<firewall::FirewallService>() {
                 fw.attach_pool((*pool).clone());
             }
+
             if let Some(dai) = self.services.resolve::<dai::DaiService>() {
                 dai.attach_pool((*pool).clone());
             }
+
+            // Routing: static routes از DB روی boot
+            if let Some(rt) = self.services.resolve::<routing::RoutingService>() {
+                rt.attach_pool((*pool).clone());
+            }
+
             if let Some(acc) = self.services.resolve::<accounting::AccountingService>() {
                 acc.attach_pool((*pool).clone());
                 if let Some(fw) = self.services.resolve::<firewall::FirewallService>() {
                     acc.attach_firewall((*fw).clone());
                 }
+                // مهم: بدون این، accounting از zone استفاده نمی‌کند
                 if let Some(net) = self.services.resolve::<network::NetworkService>() {
-                    net.attach_pool((*pool).clone());
+                    acc.attach_network((*net).clone());
                 }
             }
         }

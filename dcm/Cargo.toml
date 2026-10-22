@@ -14,6 +14,7 @@ storage = { path = "../storage" }
 dai = { path = "../core/dai" }
 
 network = { path = "../modules/network" }
+routing = { path = "../modules/routing" }
 accounting = { path = "../modules/accounting" }
 firewall = { path = "../modules/firewall" }
 

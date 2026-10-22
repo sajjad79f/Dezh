@@ -6,6 +6,7 @@ pub mod interface;
 pub mod session;
 pub mod user;
 pub mod zone;
+pub mod route;
 
 pub use asset::{AssetRepo, AssetRow};
 pub use audit::AuditRepo;
@@ -15,3 +16,4 @@ pub use interface::{InterfaceRepo, InterfaceRow};
 pub use session::SessionRepo;
 pub use user::{UserRepo, UserRow};
 pub use zone::{ZoneRepo, ZoneRow};
+pub use route::{StaticRouteRepo, StaticRouteRow};

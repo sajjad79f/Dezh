@@ -28,6 +28,10 @@ pub fn router(state: AppState) -> Router {
             get(handlers::list_firewall_rules).post(handlers::create_firewall_rule),
         )
         .route(
+            "/api/firewall/rules/delete",
+            post(handlers::delete_firewall_rule_by_body),
+        )
+        .route(
             "/api/firewall/rules/{id}",
             delete(handlers::delete_firewall_rule),
         )

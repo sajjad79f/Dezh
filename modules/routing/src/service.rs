@@ -1,20 +1,54 @@
 use std::process::Command;
+use std::sync::{Arc, RwLock};
+
+use storage::{DbPool, StaticRouteRepo, StaticRouteRow};
+use uuid::Uuid;
 
 use crate::error::{RoutingError, RoutingResult};
 use crate::models::RouteEntry;
 
-pub struct RoutingService;
+pub struct RoutingService {
+    pool: Arc<RwLock<Option<DbPool>>>,
+}
 
 impl RoutingService {
     pub fn new() -> Self {
-        Self
+        Self {
+            pool: Arc::new(RwLock::new(None)),
+        }
     }
 
-    /// اول `sudo -n ip` (بدون پسورد)، اگر نشد خود `ip`.
-    /// برای NGFW روی Debian معمولاً باید dcm با root اجرا شود
-    /// یا در sudoers خط NOPASSWD برای /sbin/ip تعریف شود.
+    pub fn attach_pool(&self, pool: DbPool) {
+        *self.pool.write().expect("routing pool lock") = Some(pool);
+        if let Err(e) = self.apply_persisted_routes() {
+            eprintln!("[routing] apply persisted routes failed: {e}");
+        } else {
+            eprintln!("[routing] persisted routes applied");
+        }
+        eprintln!("[routing] persistence attached");
+    }
+
+    fn block_on<F, T>(f: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        match tokio::runtime::Handle::try_current() {
+            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
+            Err(_) => {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("temp runtime");
+                rt.block_on(f)
+            }
+        }
+    }
+
+    fn pool(&self) -> Option<DbPool> {
+        self.pool.read().expect("routing pool lock").clone()
+    }
+
     fn run_ip(args: &[&str]) -> RoutingResult<String> {
-        // try: sudo -n ip ...
         let sudo = Command::new("sudo")
             .arg("-n")
             .arg("ip")
@@ -26,18 +60,11 @@ impl RoutingService {
                 return Ok(String::from_utf8_lossy(&output.stdout).into_owned());
             }
             let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            // اگر sudo اصلاً اجازه نداشت، برو سراغ ip مستقیم
-            if !err.contains("password is required")
-                && !err.contains("a password is required")
-                && !err.contains("not allowed")
-                && !err.is_empty()
-                && output.status.code() != Some(1)
+            if err.contains("RTNETLINK")
+                || err.contains("File exists")
+                || err.contains("No such")
             {
-                // خطای واقعی از ip (مثلاً route تکراری)
-                if err.contains("RTNETLINK") || err.contains("File exists") || err.contains("No such")
-                {
-                    return Err(RoutingError::Internal(err));
-                }
+                return Err(RoutingError::Internal(err));
             }
         }
 
@@ -52,7 +79,7 @@ impl RoutingService {
             let err = String::from_utf8_lossy(&output.stderr).trim().to_string();
             if err.contains("Operation not permitted") {
                 return Err(RoutingError::Internal(
-                    "Operation not permitted — Dezh must run as root (or grant CAP_NET_ADMIN / sudo NOPASSWD for /sbin/ip)".into(),
+                    "Operation not permitted — run Dezh as root or CAP_NET_ADMIN".into(),
                 ));
             }
             Err(RoutingError::Internal(err))
@@ -114,6 +141,7 @@ impl RoutingService {
         Ok(routes)
     }
 
+    /// اضافه کردن route زنده + ذخیره در DB
     pub fn add_route(
         &self,
         destination: &str,
@@ -129,6 +157,102 @@ impl RoutingService {
             ));
         }
 
+        Self::ip_route_add(destination, gateway, device)?;
+
+        if let Some(pool) = self.pool() {
+            let row = StaticRouteRow {
+                id: Uuid::new_v4(),
+                destination: destination.trim().to_string(),
+                gateway: gateway.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                device: device.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                description: String::new(),
+                enabled: true,
+            };
+            if let Err(e) = Self::block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
+                eprintln!("[routing] persist add_route failed: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn delete_route(
+        &self,
+        destination: &str,
+        gateway: Option<&str>,
+        device: Option<&str>,
+    ) -> RoutingResult<()> {
+        Self::ip_route_del(destination, gateway, device)?;
+
+        if let Some(pool) = self.pool() {
+            if let Ok(rows) = Self::block_on(StaticRouteRepo::new(pool.inner()).list()) {
+                for r in rows {
+                    let same_dest = r.destination == destination;
+                    let same_gw = r.gateway.as_deref() == gateway.filter(|s| !s.is_empty());
+                    let same_dev = r.device.as_deref() == device.filter(|s| !s.is_empty());
+                    // تطبیق نرم: اگر gateway/device در request خالی بود، فقط dest
+                    let gw_ok = gateway.map(|s| s.is_empty()).unwrap_or(true)
+                        || same_gw
+                        || (r.gateway.is_none() && gateway.is_none());
+                    let dev_ok = device.map(|s| s.is_empty()).unwrap_or(true)
+                        || same_dev
+                        || (r.device.is_none() && device.is_none());
+                    if same_dest
+                        && (gateway.is_none() || gateway == Some("") || r.gateway.as_deref() == gateway)
+                        && (device.is_none() || device == Some("") || r.device.as_deref() == device)
+                    {
+                        let _ = Self::block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
+                        let _ = (gw_ok, dev_ok);
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn set_default_gateway(&self, gateway: &str, device: Option<&str>) -> RoutingResult<()> {
+        let _ = Self::run_ip(&["route", "del", "default"]);
+
+        let mut args = vec!["route", "add", "default", "via", gateway];
+        if let Some(dev) = device {
+            if !dev.is_empty() {
+                args.push("dev");
+                args.push(dev);
+            }
+        }
+        Self::run_ip(&args)?;
+
+        // default را هم در DB نگه می‌داریم (destination = default)
+        if let Some(pool) = self.pool() {
+            // قبلی‌های default را پاک کن
+            if let Ok(rows) = Self::block_on(StaticRouteRepo::new(pool.inner()).list()) {
+                for r in rows.into_iter().filter(|r| r.destination == "default") {
+                    let _ = Self::block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
+                }
+            }
+            let row = StaticRouteRow {
+                id: Uuid::new_v4(),
+                destination: "default".into(),
+                gateway: Some(gateway.trim().to_string()),
+                device: device.map(|s| s.trim().to_string()).filter(|s| !s.is_empty()),
+                description: "default gateway".into(),
+                enabled: true,
+            };
+            if let Err(e) = Self::block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
+                eprintln!("[routing] persist default gateway failed: {e}");
+            }
+        }
+
+        Ok(())
+    }
+
+    fn ip_route_add(
+        destination: &str,
+        gateway: Option<&str>,
+        device: Option<&str>,
+    ) -> RoutingResult<()> {
         let mut args = vec!["route", "add", destination];
         if let Some(gw) = gateway {
             if !gw.is_empty() {
@@ -142,13 +266,11 @@ impl RoutingService {
                 args.push(dev);
             }
         }
-
         Self::run_ip(&args)?;
         Ok(())
     }
 
-    pub fn delete_route(
-        &self,
+    fn ip_route_del(
         destination: &str,
         gateway: Option<&str>,
         device: Option<&str>,
@@ -170,17 +292,31 @@ impl RoutingService {
         Ok(())
     }
 
-    pub fn set_default_gateway(&self, gateway: &str, device: Option<&str>) -> RoutingResult<()> {
-        let _ = Self::run_ip(&["route", "del", "default"]);
+    /// بعد از boot: routeهای enabled از DB
+    fn apply_persisted_routes(&self) -> RoutingResult<()> {
+        let Some(pool) = self.pool() else {
+            return Ok(());
+        };
+        let rows = Self::block_on(StaticRouteRepo::new(pool.inner()).list())
+            .map_err(|e| RoutingError::Internal(e.to_string()))?;
 
-        let mut args = vec!["route", "add", "default", "via", gateway];
-        if let Some(dev) = device {
-            if !dev.is_empty() {
-                args.push("dev");
-                args.push(dev);
+        for r in rows.into_iter().filter(|r| r.enabled) {
+            if let Err(e) = Self::ip_route_add(
+                &r.destination,
+                r.gateway.as_deref(),
+                r.device.as_deref(),
+            ) {
+                // File exists = از قبل هست — نادیده بگیر
+                let msg = e.to_string();
+                if msg.contains("File exists") {
+                    continue;
+                }
+                eprintln!(
+                    "[routing] apply {} failed: {e}",
+                    r.destination
+                );
             }
         }
-        Self::run_ip(&args)?;
         Ok(())
     }
 }
@@ -193,6 +329,8 @@ impl Default for RoutingService {
 
 impl Clone for RoutingService {
     fn clone(&self) -> Self {
-        Self
+        Self {
+            pool: Arc::clone(&self.pool),
+        }
     }
 }

@@ -63,6 +63,16 @@ pub struct CreateFirewallRuleRequest {
     pub priority: u32,
 }
 
+#[derive(Deserialize)]
+pub struct DeleteByIdQuery {
+    pub id: String,
+}
+
+#[derive(Deserialize)]
+pub struct DeleteFirewallRuleRequest {
+    pub id: String,
+}
+
 fn default_priority() -> u32 {
     100
 }

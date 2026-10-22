@@ -87,13 +87,16 @@ export function FirewallRules() {
   }
 
   async function removeRule(id: string) {
-    const res = await fetch(`/api/firewall/rules/${id}`, {
-      method: 'DELETE',
-      headers: headers(),
+    const res = await fetch('/api/firewall/rules/delete', {
+      method: 'POST',
+      headers: headers(true),
+      body: JSON.stringify({ id }),
     })
     if (!res.ok && res.status !== 204) {
-      const err = await res.json().catch(() => ({ error: res.statusText }))
-      setError(err.error || res.statusText)
+      const text = await res.text()
+      let msg = res.statusText
+      try { msg = JSON.parse(text).error || msg } catch { if (text) msg = text }
+      setError(msg)
       return
     }
     await load()
