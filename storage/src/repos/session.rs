@@ -63,7 +63,8 @@ impl<'a> SessionRepo<'a> {
 
         let row = sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.enabled
+            SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.enabled,
+                   u.must_change_password
             FROM user_sessions s
             JOIN users u ON u.id = s.user_id
             WHERE s.token_hash = $1
@@ -89,6 +90,31 @@ impl<'a> SessionRepo<'a> {
             "#,
         )
         .bind(&token_hash)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// باطل کردن همه‌ی sessionهای یک کاربر — برای تغییر رمز عبور.
+    /// اگر except_token داده شود، session مربوط به آن توکن زنده می‌ماند
+    /// (تا کاربرِ در حال تغییر رمز، لاگ‌اوت نشود).
+    pub async fn revoke_all_for_user(
+        &self,
+        user_id: Uuid,
+        except_token: Option<&str>,
+    ) -> StorageResult<()> {
+        let except_hash = except_token.map(Self::hash_token);
+        sqlx::query(
+            r#"
+            UPDATE user_sessions
+            SET revoked_at = NOW()
+            WHERE user_id = $1
+              AND revoked_at IS NULL
+              AND ($2::text IS NULL OR token_hash != $2)
+            "#,
+        )
+        .bind(user_id)
+        .bind(except_hash)
         .execute(self.pool)
         .await?;
         Ok(())

@@ -5,7 +5,6 @@ use def::middleware::{
 
 use def::registry::{
     MiddlewareRegistry,
-    Middleware,
 };
 
 use std::sync::Arc;

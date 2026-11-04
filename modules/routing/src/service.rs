@@ -2,6 +2,7 @@ use std::process::Command;
 use std::sync::{Arc, RwLock};
 
 use storage::{DbPool, StaticRouteRepo, StaticRouteRow};
+use shared_kernel::runtime::block_on;
 use uuid::Uuid;
 
 use crate::error::{RoutingError, RoutingResult};
@@ -28,21 +29,6 @@ impl RoutingService {
         eprintln!("[routing] persistence attached");
     }
 
-    fn block_on<F, T>(f: F) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
-            Err(_) => {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("temp runtime");
-                rt.block_on(f)
-            }
-        }
-    }
 
     fn pool(&self) -> Option<DbPool> {
         self.pool.read().expect("routing pool lock").clone()
@@ -168,7 +154,7 @@ impl RoutingService {
                 description: String::new(),
                 enabled: true,
             };
-            if let Err(e) = Self::block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
+            if let Err(e) = block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
                 eprintln!("[routing] persist add_route failed: {e}");
             }
         }
@@ -185,7 +171,7 @@ impl RoutingService {
         Self::ip_route_del(destination, gateway, device)?;
 
         if let Some(pool) = self.pool() {
-            if let Ok(rows) = Self::block_on(StaticRouteRepo::new(pool.inner()).list()) {
+            if let Ok(rows) = block_on(StaticRouteRepo::new(pool.inner()).list()) {
                 for r in rows {
                     let same_dest = r.destination == destination;
                     let same_gw = r.gateway.as_deref() == gateway.filter(|s| !s.is_empty());
@@ -201,7 +187,7 @@ impl RoutingService {
                         && (gateway.is_none() || gateway == Some("") || r.gateway.as_deref() == gateway)
                         && (device.is_none() || device == Some("") || r.device.as_deref() == device)
                     {
-                        let _ = Self::block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
+                        let _ = block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
                         let _ = (gw_ok, dev_ok);
                         break;
                     }
@@ -227,9 +213,9 @@ impl RoutingService {
         // default را هم در DB نگه می‌داریم (destination = default)
         if let Some(pool) = self.pool() {
             // قبلی‌های default را پاک کن
-            if let Ok(rows) = Self::block_on(StaticRouteRepo::new(pool.inner()).list()) {
+            if let Ok(rows) = block_on(StaticRouteRepo::new(pool.inner()).list()) {
                 for r in rows.into_iter().filter(|r| r.destination == "default") {
-                    let _ = Self::block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
+                    let _ = block_on(StaticRouteRepo::new(pool.inner()).delete(r.id));
                 }
             }
             let row = StaticRouteRow {
@@ -240,7 +226,7 @@ impl RoutingService {
                 description: "default gateway".into(),
                 enabled: true,
             };
-            if let Err(e) = Self::block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
+            if let Err(e) = block_on(StaticRouteRepo::new(pool.inner()).insert(&row)) {
                 eprintln!("[routing] persist default gateway failed: {e}");
             }
         }
@@ -297,7 +283,7 @@ impl RoutingService {
         let Some(pool) = self.pool() else {
             return Ok(());
         };
-        let rows = Self::block_on(StaticRouteRepo::new(pool.inner()).list())
+        let rows = block_on(StaticRouteRepo::new(pool.inner()).list())
             .map_err(|e| RoutingError::Internal(e.to_string()))?;
 
         for r in rows.into_iter().filter(|r| r.enabled) {

@@ -36,7 +36,9 @@ pub struct ErrorDto {
     pub error: String,
 }
 
-#[derive(Serialize)]
+// ─── Firewall Rules ────────────────────────────────────
+
+#[derive(Serialize, Deserialize)]
 pub struct FirewallRuleDto {
     pub id: String,
     pub name: String,
@@ -48,6 +50,28 @@ pub struct FirewallRuleDto {
     pub port: Option<u16>,
     pub enabled: bool,
     pub priority: u32,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub log: bool,
+    #[serde(default)]
+    pub source_set: Option<String>,
+    #[serde(default)]
+    pub dest_set: Option<String>,
+    #[serde(default)]
+    pub rate_limit: Option<u32>,
+    // ── فاز ۴: زمان‌بندی قانون ──
+    #[serde(default)]
+    pub schedule_enabled: bool,
+    #[serde(default)]
+    pub schedule_start: String,
+    #[serde(default)]
+    pub schedule_end: String,
+    #[serde(default)]
+    pub schedule_days: Vec<String>,
+    /// آیا الان داخل پنجره‌ی زمانی است؟ — با ساعت سرور محاسبه می‌شود
+    #[serde(default)]
+    pub schedule_active: bool,
 }
 
 #[derive(Deserialize)]
@@ -61,11 +85,59 @@ pub struct CreateFirewallRuleRequest {
     pub port: Option<u16>,
     #[serde(default = "default_priority")]
     pub priority: u32,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub log: bool,
+    #[serde(default)]
+    pub source_set: Option<String>,
+    #[serde(default)]
+    pub dest_set: Option<String>,
+    #[serde(default)]
+    pub rate_limit: Option<u32>,
+    // ── فاز ۴: زمان‌بندی قانون (اختیاری) ──
+    #[serde(default)]
+    pub schedule_enabled: bool,
+    #[serde(default)]
+    pub schedule_start: String,
+    #[serde(default)]
+    pub schedule_end: String,
+    #[serde(default)]
+    pub schedule_days: Vec<String>,
 }
 
 #[derive(Deserialize)]
-pub struct DeleteByIdQuery {
-    pub id: String,
+pub struct UpdateFirewallRuleRequest {
+    pub enabled: Option<bool>,
+    pub priority: Option<u32>,
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub log: Option<bool>,
+    /// 0 = حذف سقف
+    pub rate_limit: Option<u32>,
+    // ── فاز ۴: ویرایش کامل فیلدهای تطبیق ──
+    pub action: Option<String>,
+    pub direction: Option<String>,
+    pub protocol: Option<String>,
+    /// IP یا CIDR یا "any"
+    pub source: Option<String>,
+    /// IP یا CIDR یا "any"
+    pub destination: Option<String>,
+    /// 0 = هر پورت (any)
+    pub port: Option<u16>,
+    /// رشته‌ی خالی = حذف ارجاع به لیست
+    pub source_set: Option<String>,
+    /// رشته‌ی خالی = حذف ارجاع به لیست
+    pub dest_set: Option<String>,
+    // ── فاز ۴: زمان‌بندی — قرارداد: هر ۴ فیلد باید با هم فرستاده شوند ──
+    /// false = حذف کامل زمان‌بندی
+    pub schedule_enabled: Option<bool>,
+    /// "HH:MM"
+    pub schedule_start: Option<String>,
+    /// "HH:MM"
+    pub schedule_end: Option<String>,
+    /// ["sun",..,"sat"] — لیست خالی یعنی همه‌ی روزها
+    pub schedule_days: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
@@ -77,10 +149,175 @@ fn default_priority() -> u32 {
     100
 }
 
+/// آمار per-rule (تعداد hit و بایت) — از nftables counter
+#[derive(Serialize)]
+pub struct RuleStatDto {
+    pub rule_id: String,
+    pub packets: u64,
+    pub bytes: u64,
+}
+
+// ─── NGFW: Address Lists ───────────────────────────────
+
+#[derive(Serialize, Deserialize)]
+pub struct IpSetDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String, // blacklist | whitelist
+    pub description: String,
+    pub enabled: bool,
+    pub entries_count: usize,
+    #[serde(default)]
+    pub entries: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CreateIpSetRequest {
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct AddSetEntriesRequest {
+    pub entries: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct RemoveSetEntryRequest {
+    pub cidr: String,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateIpSetRequest {
+    pub enabled: bool,
+}
+
+// ─── NGFW: اتصال‌های زنده ──────────────────────────────
+
+#[derive(Serialize)]
+pub struct ConnectionDto {
+    pub protocol: String,
+    pub state: String,
+    pub src: String,
+    pub dst: String,
+    pub sport: Option<u16>,
+    pub dport: Option<u16>,
+    pub timeout_secs: Option<u64>,
+}
+
+// ─── NGFW: تنظیمات ─────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct FirewallSettingsDto {
+    pub dos_protection: bool,
+    pub syn_rate: u32,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateFirewallSettingsRequest {
+    pub dos_protection: Option<bool>,
+    pub syn_rate: Option<u32>,
+}
+
+// ─── NGFW: Import / Export ─────────────────────────────
+
+#[derive(Serialize, Deserialize)]
+pub struct FirewallExport {
+    #[serde(default = "default_export_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub exported_at: String,
+    #[serde(default)]
+    pub rules: Vec<FirewallRuleDto>,
+    #[serde(default)]
+    pub nat_rules: Vec<NatRuleDto>,
+    #[serde(default)]
+    pub ip_sets: Vec<IpSetDto>,
+}
+
+fn default_export_version() -> u32 {
+    1
+}
+
+#[derive(Serialize)]
+pub struct ImportResultDto {
+    pub rules_added: usize,
+    pub rules_skipped: usize,
+    pub nat_added: usize,
+    pub nat_skipped: usize,
+    pub sets_added: usize,
+    pub sets_skipped: usize,
+}
+
+// ─── فاز ۳: Security Events ─────────────────────────────
+
+#[derive(Serialize)]
+pub struct SecurityEventDto {
+    pub id: String,
+    pub created_at: String,
+    pub kind: String,
+    pub severity: String,
+    pub source_ip: Option<String>,
+    pub dest_port: Option<u16>,
+    pub rule_name: Option<String>,
+    pub hits: u64,
+    pub message: String,
+}
+
+#[derive(Serialize)]
+pub struct EventKindCount {
+    pub kind: String,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+pub struct EventSourceCount {
+    pub ip: String,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+pub struct EventPortCount {
+    pub port: u16,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+pub struct EventTimePoint {
+    pub hour: String,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+pub struct EventSummaryDto {
+    pub since_hours: u32,
+    pub total_hits: u64,
+    pub by_kind: Vec<EventKindCount>,
+    pub top_sources: Vec<EventSourceCount>,
+    pub top_ports: Vec<EventPortCount>,
+    pub timeline: Vec<EventTimePoint>,
+}
+
+// ─── Auth / Users ──────────────────────────────────────
+
 #[derive(Deserialize)]
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+}
+
+#[derive(Deserialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
 }
 
 #[derive(Serialize)]
@@ -89,6 +326,7 @@ pub struct LoginResponse {
     pub username: String,
     pub role: String,
     pub display_name: Option<String>,
+    pub must_change_password: bool,
 }
 
 #[derive(Serialize)]
@@ -97,6 +335,7 @@ pub struct MeResponse {
     pub username: String,
     pub role: String,
     pub display_name: Option<String>,
+    pub must_change_password: bool,
 }
 
 #[derive(Serialize)]
@@ -106,6 +345,7 @@ pub struct UserDto {
     pub role: String,
     pub display_name: Option<String>,
     pub enabled: bool,
+    pub must_change_password: bool,
 }
 
 #[derive(Deserialize)]
@@ -176,18 +416,14 @@ pub struct AgentUserInactiveRequest {
     pub bytes_out: i64,
 }
 
+// ─── Interfaces / Routing ──────────────────────────────
+
 #[derive(Serialize)]
 pub struct InterfaceDto {
     pub name: String,
     pub zone: String,
     pub up: bool,
     pub addresses: Vec<String>,
-}
-
-#[derive(Deserialize)]
-pub struct SetZoneRequest {
-    pub name: String,
-    pub zone: String,
 }
 
 #[derive(Serialize)]
@@ -239,7 +475,9 @@ pub struct DeleteRouteRequest {
     pub device: Option<String>,
 }
 
-#[derive(Serialize)]
+// ─── NAT ───────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize)]
 pub struct NatRuleDto {
     pub id: String,
     pub name: String,
@@ -257,7 +495,7 @@ pub struct NatRuleDto {
 #[derive(Deserialize)]
 pub struct CreateNatRuleRequest {
     pub name: String,
-    pub kind: String,              // masquerade | dnat
+    pub kind: String, // masquerade | dnat
     pub interface: String,
     #[serde(default = "default_any")]
     pub source: String,
@@ -274,6 +512,8 @@ pub struct CreateNatRuleRequest {
 fn default_any() -> String {
     "any".into()
 }
+
+// ─── Network Zones ─────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct ZoneDto {

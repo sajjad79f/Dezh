@@ -1,67 +1,30 @@
 use std::sync::Arc;
 
-use contracts::{Event, EventHandler, Result};
+use contracts::{DezhResult, Event, EventHandler};
 
 use def::registry::SubscriptionRegistry;
 
 struct Handler;
 
 impl EventHandler for Handler {
-
     fn name(&self) -> &'static str {
-
         "handler"
     }
 
-    fn handle(
-
-        &self,
-
-        _: &Event,
-
-    ) -> Result<()> {
-
+    fn handle(&self, _: &Event) -> DezhResult<()> {
         Ok(())
     }
 }
 
 #[test]
-
 fn resolve_handler() {
+    let registry = SubscriptionRegistry::new();
 
-    let registry =
+    registry.register("firewall.alert", Arc::new(Handler));
 
-        SubscriptionRegistry::new();
+    let event = Event::simple("firewall.alert", "");
 
-    registry.register(
+    let handlers = registry.handlers(&event);
 
-        "firewall.alert",
-
-        Arc::new(Handler),
-    );
-
-    let event = Event {
-
-        topic:
-
-            "firewall.alert".into(),
-
-        payload:
-
-            vec![],
-    };
-
-    let handlers =
-
-        registry.handlers(
-
-            &event,
-        );
-
-    assert_eq!(
-
-        handlers.len(),
-
-        1,
-    );
+    assert_eq!(handlers.len(), 1);
 }

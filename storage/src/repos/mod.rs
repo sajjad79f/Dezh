@@ -1,19 +1,25 @@
 pub mod asset;
 pub mod audit;
+pub mod events;
 pub mod firewall;
 pub mod identity;
 pub mod interface;
 pub mod session;
+pub mod settings;
 pub mod user;
 pub mod zone;
 pub mod route;
+pub mod fqdn;
 
+pub use fqdn::{FqdnObjectRepo, FqdnObjectRow};
 pub use asset::{AssetRepo, AssetRow};
 pub use audit::AuditRepo;
-pub use firewall::{FirewallRepo, FirewallRuleRow, NatRepo, NatRuleRow};
+pub use events::{EventsRepo, NewSecurityEvent, SecurityEventRow};
+pub use firewall::{FirewallRepo, FirewallRuleRow, IpSetRepo, IpSetRow, NatRepo, NatRuleRow};
 pub use identity::{AccountingRepo, AccountingSessionRow, IdentityRepo, IdentityRow};
 pub use interface::{InterfaceRepo, InterfaceRow};
 pub use session::SessionRepo;
+pub use settings::SettingsRepo;
 pub use user::{UserRepo, UserRow};
 pub use zone::{ZoneRepo, ZoneRow};
 pub use route::{StaticRouteRepo, StaticRouteRow};

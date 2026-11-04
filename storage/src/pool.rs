@@ -43,6 +43,7 @@ pub async fn bootstrap_admin(pool: &DbPool) -> StorageResult<()> {
         Ok(Some(id)) => {
             eprintln!("[storage] bootstrap admin CREATED id={id}");
             eprintln!("[storage] login with username=admin and DEZH_ADMIN_PASSWORD (default Admin123!)");
+            eprintln!("[storage] NOTE: admin must change password at first login");
         }
         Ok(None) => {
             eprintln!("[storage] users already exist — skip bootstrap admin");

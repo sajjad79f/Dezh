@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+shared-kernel = { path = "../../shared-kernel" }
 contracts = { path = "../../contracts" }
 storage = { path = "../../storage" }
 

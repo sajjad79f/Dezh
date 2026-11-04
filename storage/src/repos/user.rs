@@ -16,6 +16,7 @@ pub struct UserRow {
     pub display_name: Option<String>,
     pub role: String,
     pub enabled: bool,
+    pub must_change_password: bool,
 }
 
 pub struct UserRepo<'a> {
@@ -75,7 +76,7 @@ impl<'a> UserRepo<'a> {
     pub async fn find_by_username(&self, username: &str) -> StorageResult<Option<UserRow>> {
         let row = sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT id, username, password_hash, display_name, role, enabled
+            SELECT id, username, password_hash, display_name, role, enabled, must_change_password
             FROM users
             WHERE username = $1
             "#,
@@ -93,7 +94,7 @@ impl<'a> UserRepo<'a> {
         Ok(n)
     }
 
-    /// اگر هیچ کاربری نباشد، admin می‌سازد
+    /// اگر هیچ کاربری نباشد، admin می‌سازد — با پرچم اجبار تغییر رمز
     pub async fn ensure_bootstrap_admin(
         &self,
         username: &str,
@@ -107,12 +108,53 @@ impl<'a> UserRepo<'a> {
         let id = self
             .create(username, password, Some("Administrator"), "admin")
             .await?;
+        // کاربر بوت‌استرپ باید در اولین ورود رمزش را عوض کند
+        self.set_must_change_password(id, true).await?;
         Ok(Some(id))
     }
+
+    /// به‌روزرسانی رمز عبور — پرچم must_change_password را هم صفر می‌کند
+    pub async fn update_password(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> StorageResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET password_hash = $2, must_change_password = FALSE
+            WHERE id = $1
+            "#,
+        )
+        .bind(user_id)
+        .bind(password_hash)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// تنظیم مستقیم پرچم اجبار تغییر رمز
+    pub async fn set_must_change_password(
+        &self,
+        user_id: Uuid,
+        flag: bool,
+    ) -> StorageResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE users SET must_change_password = $2 WHERE id = $1
+            "#,
+        )
+        .bind(user_id)
+        .bind(flag)
+        .execute(self.pool)
+        .await?;
+        Ok(())
+    }
+
     pub async fn list(&self) -> StorageResult<Vec<UserRow>> {
         let rows = sqlx::query_as::<_, UserRow>(
             r#"
-            SELECT id, username, password_hash, display_name, role, enabled
+            SELECT id, username, password_hash, display_name, role, enabled, must_change_password
             FROM users
             ORDER BY username
             "#,

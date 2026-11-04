@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use storage::{DbPool, InterfaceRepo, ZoneRepo};
+use shared_kernel::runtime::block_on;
 use uuid::Uuid;
 
 use crate::error::{NetworkError, NetworkResult};
@@ -30,21 +31,6 @@ impl NetworkService {
         eprintln!("[network] persistence attached");
     }
 
-    fn block_on<F, T>(f: F) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
-            Err(_) => {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("temp runtime");
-                rt.block_on(f)
-            }
-        }
-    }
 
     fn pool(&self) -> NetworkResult<DbPool> {
         self.pool
@@ -56,7 +42,7 @@ impl NetworkService {
 
     fn load_zones_from_db(&self, pool: &DbPool) -> Result<(), String> {
         let repo = InterfaceRepo::new(pool.inner());
-        let rows = Self::block_on(repo.list()).map_err(|e| e.to_string())?;
+        let rows = block_on(repo.list()).map_err(|e| e.to_string())?;
         let mut map = self.zones.write().expect("zones lock");
         map.clear();
         for r in rows {
@@ -69,7 +55,7 @@ impl NetworkService {
 
     pub fn list_zones(&self) -> NetworkResult<Vec<ZoneInfo>> {
         let pool = self.pool()?;
-        let rows = Self::block_on(ZoneRepo::new(pool.inner()).list())
+        let rows = block_on(ZoneRepo::new(pool.inner()).list())
             .map_err(|e| NetworkError::Internal(e.to_string()))?;
         Ok(rows
             .into_iter()
@@ -91,7 +77,7 @@ impl NetworkService {
         description: &str,
     ) -> NetworkResult<Uuid> {
         let pool = self.pool()?;
-        Self::block_on(
+        block_on(
             ZoneRepo::new(pool.inner()).create(name, display_name, accounting, description),
         )
         .map_err(|e| NetworkError::Internal(e.to_string()))
@@ -105,7 +91,7 @@ impl NetworkService {
         description: &str,
     ) -> NetworkResult<()> {
         let pool = self.pool()?;
-        Self::block_on(
+        block_on(
             ZoneRepo::new(pool.inner()).update(name, display_name, accounting, description),
         )
         .map_err(|e| NetworkError::Internal(e.to_string()))
@@ -114,14 +100,14 @@ impl NetworkService {
     pub fn delete_zone(&self, name: &str) -> NetworkResult<()> {
         let pool = self.pool()?;
         // اگر ifaceای روی این زون است، حذف نکن
-        let ifaces = Self::block_on(InterfaceRepo::new(pool.inner()).list())
+        let ifaces = block_on(InterfaceRepo::new(pool.inner()).list())
             .map_err(|e| NetworkError::Internal(e.to_string()))?;
         if ifaces.iter().any(|i| i.zone == name) {
             return Err(NetworkError::Internal(format!(
                 "zone '{name}' is assigned to an interface"
             )));
         }
-        Self::block_on(ZoneRepo::new(pool.inner()).delete(name)).map_err(|e| {
+        block_on(ZoneRepo::new(pool.inner()).delete(name)).map_err(|e| {
             if matches!(e, storage::StorageError::NotFound(_)) {
                 NetworkError::NotFound(name.into())
             } else {
@@ -133,7 +119,7 @@ impl NetworkService {
     /// اینترفیس‌هایی که زون‌شان accounting=true دارد
     pub fn accounting_interfaces(&self) -> NetworkResult<Vec<String>> {
         let pool = self.pool()?;
-        let acc_zones = Self::block_on(ZoneRepo::new(pool.inner()).accounting_zone_names())
+        let acc_zones = block_on(ZoneRepo::new(pool.inner()).accounting_zone_names())
             .map_err(|e| NetworkError::Internal(e.to_string()))?;
         if acc_zones.is_empty() {
             return Ok(vec![]);
@@ -160,13 +146,13 @@ impl NetworkService {
 
         if let Some(ref pool) = pool {
             let repo = InterfaceRepo::new(pool.inner());
-            if let Ok(rows) = Self::block_on(repo.list()) {
+            if let Ok(rows) = block_on(repo.list()) {
                 for r in rows {
                     cfg.insert(r.name.clone(), r);
                 }
             }
             for (name, _, _) in &system {
-                let _ = Self::block_on(repo.ensure_known(name));
+                let _ = block_on(repo.ensure_known(name));
             }
         }
 
@@ -201,7 +187,7 @@ impl NetworkService {
     pub fn set_zone(&self, iface: &str, zone: &str) -> NetworkResult<()> {
         let zone = zone.trim().to_lowercase();
         let pool = self.pool()?;
-        if Self::block_on(ZoneRepo::new(pool.inner()).find_by_name(&zone))
+        if block_on(ZoneRepo::new(pool.inner()).find_by_name(&zone))
             .map_err(|e| NetworkError::Internal(e.to_string()))?
             .is_none()
         {
@@ -209,7 +195,7 @@ impl NetworkService {
                 "unknown zone '{zone}' — create it under Network → Zones"
             )));
         }
-        Self::block_on(InterfaceRepo::new(pool.inner()).set_zone(iface, &zone))
+        block_on(InterfaceRepo::new(pool.inner()).set_zone(iface, &zone))
             .map_err(|e| NetworkError::Internal(e.to_string()))?;
         self.zones
             .write()
@@ -238,14 +224,14 @@ impl NetworkService {
         }
 
         let pool = self.pool()?;
-        if Self::block_on(ZoneRepo::new(pool.inner()).find_by_name(&zone))
+        if block_on(ZoneRepo::new(pool.inner()).find_by_name(&zone))
             .map_err(|e| NetworkError::Internal(e.to_string()))?
             .is_none()
         {
             return Err(NetworkError::Internal(format!("unknown zone '{zone}'")));
         }
 
-        Self::block_on(InterfaceRepo::new(pool.inner()).update_config(
+        block_on(InterfaceRepo::new(pool.inner()).update_config(
             name,
             &zone,
             enabled,

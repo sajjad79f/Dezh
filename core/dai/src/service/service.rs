@@ -3,6 +3,7 @@ use uuid::Uuid;
 
 use contracts::CoreService;
 use storage::{AssetRepo, DbPool};
+use shared_kernel::runtime::block_on;
 
 use crate::error::DaiResult;
 use crate::models::{Asset, AssetStatus, AssetType};
@@ -29,25 +30,10 @@ impl DaiService {
         eprintln!("[dai] persistence attached");
     }
 
-    fn block_on<F, T>(f: F) -> T
-    where
-        F: std::future::Future<Output = T>,
-    {
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => tokio::task::block_in_place(|| handle.block_on(f)),
-            Err(_) => {
-                let rt = tokio::runtime::Builder::new_current_thread()
-                    .enable_all()
-                    .build()
-                    .expect("temp runtime");
-                rt.block_on(f)
-            }
-        }
-    }
 
     fn load_from_db(&self, pool: &DbPool) -> Result<(), String> {
         let repo = AssetRepo::new(pool.inner());
-        let rows = Self::block_on(repo.list()).map_err(|e| e.to_string())?;
+        let rows = block_on(repo.list()).map_err(|e| e.to_string())?;
 
         self.registry.clear();
         for row in rows {
@@ -72,7 +58,7 @@ impl DaiService {
             return; // هنوز pool وصل نشده — فقط RAM
         };
         let repo = AssetRepo::new(pool.inner());
-        if let Err(e) = Self::block_on(repo.insert(id, name, asset_type, status)) {
+        if let Err(e) = block_on(repo.insert(id, name, asset_type, status)) {
             eprintln!("[dai] persist insert failed: {e}");
         }
     }
@@ -83,7 +69,7 @@ impl DaiService {
             return;
         };
         let repo = AssetRepo::new(pool.inner());
-        if let Err(e) = Self::block_on(repo.set_status(id, status)) {
+        if let Err(e) = block_on(repo.set_status(id, status)) {
             eprintln!("[dai] persist status failed: {e}");
         }
     }

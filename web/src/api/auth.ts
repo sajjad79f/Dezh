@@ -17,6 +17,7 @@ export interface LoginResult {
   username: string
   role: string
   display_name: string | null
+  must_change_password: boolean
 }
 
 export interface MeResult {
@@ -24,6 +25,7 @@ export interface MeResult {
   username: string
   role: string
   display_name: string | null
+  must_change_password: boolean
 }
 
 export async function login(username: string, password: string): Promise<LoginResult> {
@@ -62,4 +64,28 @@ export async function logout(): Promise<void> {
     }).catch(() => {})
   }
   clearToken()
+}
+
+export async function changePassword(
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  const token = getToken()
+  if (!token) throw new Error('not authenticated')
+
+  const res = await fetch('/api/auth/password', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      current_password: currentPassword,
+      new_password: newPassword,
+    }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: res.statusText }))
+    throw new Error(err.error || 'Password change failed')
+  }
 }

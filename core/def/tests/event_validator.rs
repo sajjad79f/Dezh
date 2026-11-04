@@ -3,53 +3,15 @@ use contracts::Event;
 use def::validation::EventValidator;
 
 #[test]
-
 fn validate_event() {
+    let event = Event::simple("system.start", "");
 
-    let event = Event {
-
-        topic:
-
-            "system.start".into(),
-
-        payload:
-
-            vec![],
-    };
-
-    assert!(
-
-        EventValidator::validate(
-
-            &event,
-        )
-
-        .is_ok()
-    );
+    assert!(EventValidator::validate(&event).is_ok());
 }
 
 #[test]
-
 fn empty_topic() {
+    let event = Event::simple("", "");
 
-    let event = Event {
-
-        topic:
-
-            "".into(),
-
-        payload:
-
-            vec![],
-    };
-
-    assert!(
-
-        EventValidator::validate(
-
-            &event,
-        )
-
-        .is_err()
-    );
+    assert!(EventValidator::validate(&event).is_err());
 }

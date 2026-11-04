@@ -3,6 +3,7 @@ pub mod command;
 pub mod config;
 pub mod logger;
 pub mod prelude;
+pub mod runtime;
 pub mod registry;
 pub mod service_container;
 pub mod version;

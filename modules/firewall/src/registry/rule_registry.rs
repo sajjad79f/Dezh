@@ -58,6 +58,19 @@ impl RuleRegistry {
         Ok(())
     }
 
+    /// ویرایش عمومی یک قانون (priority / name / description / log / ...)
+    /// و مرتب‌سازی دوباره بر اساس اولویت جدید
+    pub fn update(&self, id: Uuid, f: impl FnOnce(&mut FirewallRule)) -> FirewallResult<()> {
+        let mut rules = self.rules.write().expect("firewall registry lock poisoned");
+        let rule = rules
+            .iter_mut()
+            .find(|r| r.id == id)
+            .ok_or(FirewallError::RuleNotFound(id))?;
+        f(rule);
+        rules.sort_by_key(|r| r.priority);
+        Ok(())
+    }
+
     pub fn count(&self) -> usize {
         self.rules
             .read()

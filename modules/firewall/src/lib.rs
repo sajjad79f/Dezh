@@ -6,6 +6,8 @@ pub mod module;
 pub mod system;
 
 pub use error::{FirewallError, FirewallResult};
-pub use models::{FirewallRule, InterfaceInfo, Protocol, RuleAction, RuleDirection, Zone};
+pub use models::{
+    FirewallRule, InterfaceInfo, Protocol, RuleAction, RuleDirection, RuleSchedule, Zone,
+};
 pub use module::FirewallModule;
-pub use service::FirewallService;
+pub use service::{ConnectionRow, FirewallService, FirewallSettings};

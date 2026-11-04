@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 
 [dependencies]
+shared-kernel = { path = "../../shared-kernel" }
 contracts = { path = "../../contracts" }
 storage = { path = "../../storage" }
 
@@ -14,3 +15,4 @@ thiserror.workspace = true
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+chrono = { workspace = true }

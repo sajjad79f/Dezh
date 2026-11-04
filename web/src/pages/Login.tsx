@@ -18,7 +18,12 @@ export function Login() {
     try {
       const result = await login(username.trim(), password)
       setToken(result.token)
-      navigate('/', { replace: true })
+      // اگر رمز موقت/پیش‌فرض است، اول باید عوض شود
+      if (result.must_change_password) {
+        navigate('/change-password', { replace: true })
+      } else {
+        navigate('/', { replace: true })
+      }
     } catch (err: any) {
       setError(err.message || 'Login failed')
     } finally {

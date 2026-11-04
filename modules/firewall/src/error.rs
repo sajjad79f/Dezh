@@ -9,6 +9,9 @@ pub enum FirewallError {
     #[error("invalid rule: {0}")]
     InvalidRule(String),
 
+    #[error("address list not found: {0}")]
+    SetNotFound(String),
+
     #[error("internal error: {0}")]
     Internal(String),
 }
