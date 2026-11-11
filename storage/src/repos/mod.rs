@@ -10,6 +10,8 @@ pub mod user;
 pub mod zone;
 pub mod route;
 pub mod fqdn;
+pub mod pppoe;
+pub mod vpnwan;
 
 pub use fqdn::{FqdnObjectRepo, FqdnObjectRow};
 pub use asset::{AssetRepo, AssetRow};
@@ -23,3 +25,5 @@ pub use settings::SettingsRepo;
 pub use user::{UserRepo, UserRow};
 pub use zone::{ZoneRepo, ZoneRow};
 pub use route::{StaticRouteRepo, StaticRouteRow};
+pub use pppoe::{PppoeRepo, PppoeRow};
+pub use vpnwan::{VpnWanRepo, VpnWanRow};

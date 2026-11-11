@@ -57,7 +57,7 @@ fn read_interval(pool: &DbPool) -> u64 {
 }
 
 /// resolve همه‌ی اشیای فعال — خروجی: آیا کشِ حداقل یک شیء تغییر کرد؟
-fn resolve_all(pool: &DbPool) -> bool {
+pub(crate) fn resolve_all(pool: &DbPool) -> bool {
     let repo = FqdnObjectRepo::new(pool.inner());
     let objects = match block_on(repo.list_enabled()) {
         Ok(o) => o,

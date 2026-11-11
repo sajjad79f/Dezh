@@ -100,3 +100,30 @@ impl<'a> InterfaceRepo<'a> {
         Ok(())
     }
 }
+
+
+// ─── [N1b] rename cascade ──────────────────────────────────────────
+
+impl<'a> InterfaceRepo<'a> {
+    /// یک رکورد را با نام حذف می‌کند (برای rename: رکورد قدیم بعد از
+    /// upsert رکورد جدید حذف می‌شود)
+    pub async fn delete_iface(&self, name: &str) -> StorageResult<()> {
+        sqlx::query(r#"DELETE FROM network_interfaces WHERE name = $1"#)
+            .bind(name)
+            .execute(self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn find_by_name(&self, name: &str) -> StorageResult<Option<InterfaceRow>> {
+        Ok(sqlx::query_as::<_, InterfaceRow>(
+            r#"
+            SELECT name, zone, enabled, ipv4_mode, address_cidr, gateway, description
+            FROM network_interfaces WHERE name = $1
+            "#,
+        )
+        .bind(name)
+        .fetch_optional(self.pool)
+        .await?)
+    }
+}

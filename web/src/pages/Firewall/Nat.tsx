@@ -1,5 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { getToken } from '../../api/auth'
+import { type FormEvent, useEffect, useState } from 'react'
 import { authHeaders, readJson, readEmpty } from '../../api/http'
 
 interface NatRule {
@@ -38,13 +37,6 @@ export function FirewallNat() {
   const [target, setTarget] = useState('')
   const [description, setDescription] = useState('')
 
-  function headers(json = false): HeadersInit {
-    const token = getToken()
-    return {
-      ...(json ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }
-  }
 
   async function load() {
     try {

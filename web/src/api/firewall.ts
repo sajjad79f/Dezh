@@ -17,6 +17,8 @@ export interface FirewallRule {
   log: boolean
   source_set: string | null
   dest_set: string | null
+  source_fqdn: string | null
+  dest_fqdn: string | null
   rate_limit: number | null
   // ── فاز ۴: زمان‌بندی (محاسبه‌ی active با ساعت سرور) ──
   schedule_enabled: boolean

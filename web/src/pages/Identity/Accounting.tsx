@@ -148,7 +148,7 @@ export default function Accounting() {
     }
   }
 
-  const tabBtn = (key: typeof tab, label: string): React.CSSProperties => ({
+  const tabBtn = (key: typeof tab, _label: string): React.CSSProperties => ({
     padding: '6px 14px',
     borderRadius: 8,
     cursor: 'pointer',

@@ -23,6 +23,7 @@ import {
   fmtBytes,
   type FirewallRule,
   type IpSet,
+  type FqdnObject,
   type RuleStat,
   type Connection,
 } from '../../api/firewall'
@@ -143,6 +144,7 @@ function Donut({ segments, total }: { segments: { label: string; value: number; 
 export function FirewallRules() {
   const [rules, setRules] = useState<FirewallRule[]>([])
   const [sets, setSets] = useState<IpSet[]>([])
+  const [fqdns, setFqdns] = useState<FqdnObject[]>([])
   const [stats, setStats] = useState<Record<string, RuleStat>>({})
   const [conns, setConns] = useState<Connection[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -223,12 +225,14 @@ export function FirewallRules() {
   /* ── لود قوانین + مجموعه‌ها ── */
   const load = useCallback(async function load() {
     try {
-      const [r, s] = await Promise.all([
+      const [r, s, f] = await Promise.all([
         firewallApi.listRules(),
         firewallApi.listSets().catch(() => [] as IpSet[]),
+        firewallApi.listFqdn().catch(() => [] as FqdnObject[]),
       ])
       setRules(r)
       setSets(s)
+      setFqdns(f)
       diffChanges(r)
     } catch (e: any) {
       showToast('err', e.message)
@@ -954,6 +958,7 @@ export function FirewallRules() {
         <RuleModal
           rule={modal.rule}
           sets={sets}
+          fqdns={fqdns}
           onClose={() => setModal({ open: false, rule: null })}
           onSaved={async (msg) => {
             setModal({ open: false, rule: null })

@@ -1,5 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { getToken } from '../../api/auth'
+import { type FormEvent, useEffect, useState } from 'react'
 import { authHeaders, readJson, readEmpty } from '../../api/http'
 
 interface Zone {
@@ -20,13 +19,6 @@ export function NetworkZones() {
   const [accounting, setAccounting] = useState(false)
   const [description, setDescription] = useState('')
 
-  function headers(json = false): HeadersInit {
-    const token = getToken()
-    return {
-      ...(json ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }
-  }
 
   async function load() {
     try {

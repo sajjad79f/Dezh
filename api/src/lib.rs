@@ -113,6 +113,14 @@ pub fn router(state: AppState) -> Router {
             post(handlers::add_set_entries).delete(handlers::remove_set_entry),
         )
         .route(
+            "/api/firewall/fqdn",
+            get(handlers::list_fqdn_objects).post(handlers::create_fqdn_object),
+        )
+        .route(
+            "/api/firewall/fqdn/:name",
+            patch(handlers::update_fqdn_object).delete(handlers::delete_fqdn_object),
+        )
+        .route(
             "/api/firewall/settings",
             get(handlers::get_firewall_settings).put(handlers::update_firewall_settings),
         )
@@ -198,6 +206,43 @@ pub fn router(state: AppState) -> Router {
             "/api/network/interfaces/config",
             post(handlers::apply_interface_config),
         )
+        .route(
+            "/api/network/interfaces/rename",
+            post(handlers::rename_interface),
+        )
+        .route(
+            "/api/network/pppoe",
+            get(handlers::pppoe_state).post(handlers::pppoe_save),
+        )
+        .route(
+            "/api/network/pppoe/:name/start",
+            post(handlers::pppoe_start),
+        )
+        .route(
+            "/api/network/pppoe/:name/stop",
+            post(handlers::pppoe_stop),
+        )
+        .route(
+            "/api/network/pppoe/:name",
+            delete(handlers::pppoe_delete),
+        )
+        .route(
+            "/api/network/vpn",
+            get(handlers::vpn_state).post(handlers::vpn_save),
+        )
+        .route(
+            "/api/network/vpn/:name/start",
+            post(handlers::vpn_start),
+        )
+        .route(
+            "/api/network/vpn/:name/stop",
+            post(handlers::vpn_stop),
+        )
+        .route(
+            "/api/network/vpn/:name",
+            delete(handlers::vpn_delete),
+        )
+        .route("/api/network/summary", get(handlers::network_summary))
         .layer(cors)
         .with_state(state)
 }

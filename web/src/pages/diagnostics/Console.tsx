@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { api } from '../../api/client'
 import type { CommandDto } from '../../types'
 

@@ -41,14 +41,7 @@ const navSections: NavSection[] = [
   {
     title: 'Operations',
     items: [
-      {
-        icon: Cable,
-        label: 'Network',
-        children: [
-          { to: '/network/interfaces', label: 'Interfaces' },
-          { to: '/network/zones', label: 'Zones' },
-        ],
-      },
+      { to: '/network', icon: Cable, label: 'Network' },
       { to: '/routing', icon: Route, label: 'Routing' },
       { to: '/console', icon: Terminal, label: 'Console' },
     ],

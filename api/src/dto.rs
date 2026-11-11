@@ -58,6 +58,11 @@ pub struct FirewallRuleDto {
     pub source_set: Option<String>,
     #[serde(default)]
     pub dest_set: Option<String>,
+    // ── فاز ۵: ارجاع به شیء دامنه (اولویت تطبیق: fqdn > set > متن) ──
+    #[serde(default)]
+    pub source_fqdn: Option<String>,
+    #[serde(default)]
+    pub dest_fqdn: Option<String>,
     #[serde(default)]
     pub rate_limit: Option<u32>,
     // ── فاز ۴: زمان‌بندی قانون ──
@@ -93,6 +98,9 @@ pub struct CreateFirewallRuleRequest {
     pub source_set: Option<String>,
     #[serde(default)]
     pub dest_set: Option<String>,
+    /// رشته‌ی خالی = حذف ارجاع به شیء دامنه
+    pub source_fqdn: Option<String>,
+    pub dest_fqdn: Option<String>,
     #[serde(default)]
     pub rate_limit: Option<u32>,
     // ── فاز ۴: زمان‌بندی قانون (اختیاری) ──
@@ -129,6 +137,9 @@ pub struct UpdateFirewallRuleRequest {
     pub source_set: Option<String>,
     /// رشته‌ی خالی = حذف ارجاع به لیست
     pub dest_set: Option<String>,
+    /// رشته‌ی خالی = حذف ارجاع به شیء دامنه
+    pub source_fqdn: Option<String>,
+    pub dest_fqdn: Option<String>,
     // ── فاز ۴: زمان‌بندی — قرارداد: هر ۴ فیلد باید با هم فرستاده شوند ──
     /// false = حذف کامل زمان‌بندی
     pub schedule_enabled: Option<bool>,
@@ -542,6 +553,18 @@ pub struct UpdateZoneRequest {
     pub description: String,
 }
 
+/// خلاصهٔ داشبورد شبکه (N1)
+#[derive(Serialize)]
+pub struct NetworkSummaryDto {
+    pub total_interfaces: usize,
+    pub up_interfaces: usize,
+    pub down_interfaces: usize,
+    pub zones: usize,
+    pub rx_bytes: u64,
+    pub tx_bytes: u64,
+    pub generated_at: u64,
+}
+
 #[derive(Serialize)]
 pub struct NetworkInterfaceDto {
     pub name: String,
@@ -569,6 +592,154 @@ pub struct InterfaceConfigRequest {
     pub ipv4_mode: String, // none | static | dhcp
     pub address_cidr: Option<String>,
     pub gateway: Option<String>,
+    #[serde(default)]
+    pub description: String,
+}
+
+// ─── فاز ۵: اشیاء FQDN ─────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct FqdnObjectDto {
+    pub id: String,
+    pub name: String,
+    pub fqdn: String,
+    pub description: String,
+    pub enabled: bool,
+    /// کش رزولوشن — v4/v6 مخلوط (تفکیک با وجود ':')
+    pub resolved: Vec<String>,
+    pub last_resolved_at: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateFqdnRequest {
+    pub name: String,
+    pub fqdn: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+#[derive(Deserialize)]
+pub struct UpdateFqdnRequest {
+    pub enabled: bool,
+}
+
+
+// ─── [N1b] rename interface ────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct RenameInterfaceRequest {
+    pub name: String,
+    pub new_name: String,
+}
+
+
+// ─── N2: PPPoE ─────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct PppoeSessionDto {
+    pub iface: String,
+    pub profile: Option<String>,
+    pub local_ip: Option<String>,
+    pub remote_ip: Option<String>,
+    pub up: bool,
+}
+
+#[derive(Serialize)]
+pub struct PppoeProfileDto {
+    pub name: String,
+    pub parent_iface: String,
+    pub username: String,
+    pub mtu: u32,
+    pub default_route: bool,
+    pub keepalive: u32,
+    pub enabled: bool,
+    pub description: String,
+    pub session: Option<PppoeSessionDto>,
+}
+
+#[derive(Serialize)]
+pub struct PppoeStateDto {
+    pub profiles: Vec<PppoeProfileDto>,
+    pub sessions: Vec<PppoeSessionDto>,
+}
+
+fn dezh_default_mtu() -> u32 {
+    1492
+}
+fn dezh_default_keepalive() -> u32 {
+    10
+}
+fn dezh_default_true() -> bool {
+    true
+}
+
+#[derive(Deserialize)]
+pub struct PppoeSaveRequest {
+    pub name: String,
+    pub parent_iface: String,
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "dezh_default_mtu")]
+    pub mtu: u32,
+    #[serde(default = "dezh_default_true")]
+    pub default_route: bool,
+    #[serde(default = "dezh_default_keepalive")]
+    pub keepalive: u32,
+    #[serde(default = "dezh_default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub description: String,
+}
+
+
+// ─── N3: VPN WAN (PPTP / L2TP) ─────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct VpnConnectionDto {
+    pub name: String,
+    pub kind: String,
+    pub server: String,
+    pub username: String,
+    pub mtu: u32,
+    pub default_route: bool,
+    pub keepalive: u32,
+    pub enabled: bool,
+    pub description: String,
+    pub session: Option<PppoeSessionDto>,
+}
+
+#[derive(Serialize)]
+pub struct VpnWanStateDto {
+    pub connections: Vec<VpnConnectionDto>,
+    pub sessions: Vec<PppoeSessionDto>,
+}
+
+fn dezh_default_mtu_vpn() -> u32 {
+    1400
+}
+
+#[derive(Deserialize)]
+pub struct VpnSaveRequest {
+    pub name: String,
+    pub kind: String,
+    pub server: String,
+    pub username: String,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default = "dezh_default_mtu_vpn")]
+    pub mtu: u32,
+    #[serde(default)]
+    pub default_route: bool,
+    #[serde(default = "dezh_default_keepalive")]
+    pub keepalive: u32,
+    #[serde(default = "dezh_default_true")]
+    pub enabled: bool,
     #[serde(default)]
     pub description: String,
 }

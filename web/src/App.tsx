@@ -5,8 +5,7 @@ import { Login } from './pages/Login'
 import { ChangePassword } from './pages/ChangePassword'
 import { Dashboard } from './pages/Dashboard'
 
-import { NetworkInterfaces } from './pages/network/Interfaces'
-import { NetworkZones } from './pages/network/Zones'
+import { NetworkDashboard } from './pages/network/Dashboard'
 import { FirewallRules } from './pages/Firewall/Rules'
 import { FirewallSets } from './pages/Firewall/Sets'
 import { FirewallFqdn } from './pages/Firewall/Fqdn'
@@ -37,8 +36,9 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
 
-            <Route path="/network/interfaces" element={<NetworkInterfaces />} />
-            <Route path="/network/zones" element={<NetworkZones />} />
+            <Route path="/network" element={<NetworkDashboard />} />
+            <Route path="/network/interfaces" element={<Navigate to="/network" replace />} />
+            <Route path="/network/zones" element={<Navigate to="/network?tab=zones" replace />} />
 
             <Route path="/firewall" element={<Navigate to="/firewall/rules" replace />} />
             <Route path="/firewall/rules" element={<FirewallRules />} />

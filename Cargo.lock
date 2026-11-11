@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "accounting"
+version = "0.1.0-alpha"
+dependencies = [
+ "contracts",
+ "firewall",
+ "network",
+ "serde_json",
+ "storage",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "allocator-api2"
 version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -21,11 +35,15 @@ dependencies = [
 name = "api"
 version = "0.1.0-alpha"
 dependencies = [
+ "accounting",
  "async-trait",
  "axum",
+ "chrono",
  "contracts",
  "firewall",
+ "network",
  "rand",
+ "routing",
  "serde",
  "serde_json",
  "shared-kernel",
@@ -181,6 +199,7 @@ dependencies = [
 name = "bootstrap"
 version = "0.1.0-alpha"
 dependencies = [
+ "accounting",
  "contracts",
  "dai",
  "dde",
@@ -189,6 +208,8 @@ dependencies = [
  "dkg",
  "firewall",
  "monitoring",
+ "network",
+ "routing",
  "shared-kernel",
  "uuid",
  "vpn",
@@ -317,7 +338,9 @@ version = "0.1.0-alpha"
 dependencies = [
  "contracts",
  "shared-kernel",
+ "storage",
  "thiserror",
+ "tokio",
  "uuid",
 ]
 
@@ -325,11 +348,16 @@ dependencies = [
 name = "dcm"
 version = "0.1.0-alpha"
 dependencies = [
+ "accounting",
  "api",
  "bootstrap",
  "contracts",
+ "dai",
  "firewall",
+ "network",
+ "routing",
  "shared-kernel",
+ "sqlx",
  "storage",
  "tokio",
 ]
@@ -475,7 +503,11 @@ checksum = "26b73573e6edcd2af0cdf47bd6cb58f0b3839491263c314eaad1ccf24430e1de"
 name = "firewall"
 version = "0.1.0-alpha"
 dependencies = [
+ "chrono",
  "contracts",
+ "serde",
+ "serde_json",
+ "shared-kernel",
  "storage",
  "thiserror",
  "tokio",
@@ -964,6 +996,10 @@ dependencies = [
 [[package]]
 name = "linux-agent"
 version = "0.1.0-alpha"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "litemap"
@@ -1038,6 +1074,19 @@ dependencies = [
 [[package]]
 name = "nac"
 version = "0.1.0-alpha"
+
+[[package]]
+name = "network"
+version = "0.1.0-alpha"
+dependencies = [
+ "contracts",
+ "serde",
+ "shared-kernel",
+ "storage",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "ntapi"
@@ -1303,6 +1352,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "routing"
+version = "0.1.0-alpha"
+dependencies = [
+ "contracts",
+ "shared-kernel",
+ "storage",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "rsa"
 version = "0.9.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1433,6 +1494,7 @@ name = "shared-kernel"
 version = "0.1.0-alpha"
 dependencies = [
  "contracts",
+ "tokio",
 ]
 
 [[package]]

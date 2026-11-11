@@ -1,5 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react'
-import { getToken } from '../../api/auth'
+import { type FormEvent, useEffect, useState } from 'react'
 import { authHeaders, readJson, readEmpty } from '../../api/http'
 
 interface Iface {
@@ -33,13 +32,6 @@ export function NetworkInterfaces() {
   const [cidr, setCidr] = useState('')
   const [gateway, setGateway] = useState('')
 
-  function headers(json = false): HeadersInit {
-    const token = getToken()
-    return {
-      ...(json ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    }
-  }
 
   async function load() {
     try {

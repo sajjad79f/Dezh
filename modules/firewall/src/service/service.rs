@@ -51,6 +51,8 @@ pub struct FirewallService {
     registry: Arc<RuleRegistry>,
     pool: Arc<RwLock<Option<DbPool>>>,
     zones: Arc<RwLock<HashMap<String, Zone>>>,
+    // قفل سری‌سازی اجراهای apply_rules — attach/resolver/scheduler/API نباید هم‌زمان تداخل کنند
+    apply_lock: Arc<std::sync::Mutex<()>>,
 }
 
 impl FirewallService {
@@ -59,6 +61,7 @@ impl FirewallService {
             registry: Arc::new(RuleRegistry::new()),
             pool: Arc::new(RwLock::new(None)),
             zones: Arc::new(RwLock::new(HashMap::new())),
+            apply_lock: Arc::new(std::sync::Mutex::new(())),
         }
     }
 
@@ -749,6 +752,99 @@ impl FirewallService {
         Ok(())
     }
 
+        // ─── فاز ۵: اشیای دامنه (FQDN) ─────────────────────────────
+
+    /// فهرست اشیای دامنه — برای UI و اعتبارسنجی ارجاع قوانین در API
+    pub fn list_fqdn_objects(&self) -> FirewallResult<Vec<FqdnObjectRow>> {
+        let guard = self.pool.read().expect("firewall pool lock");
+        let Some(pool) = guard.as_ref() else {
+            return Ok(Vec::new());
+        };
+        block_on(FqdnRepo::new(pool.inner()).list())
+            .map_err(|e| FirewallError::Internal(e.to_string()))
+    }
+
+    /// ساخت شیء دامنه. اگر فعال باشد، بلافاصله resolve می‌شود تا set
+    /// تا چرخه‌ی بعدیِ ترد resolver خالی نماند.
+    pub fn create_fqdn_object(
+        &self,
+        name: &str,
+        fqdn: &str,
+        description: &str,
+        enabled: bool,
+    ) -> FirewallResult<Uuid> {
+        let name = Self::validate_set_name(name)?; // همان قاعده‌ی نام Address List
+        let fqdn = crate::models::normalize_domain(fqdn);
+        crate::models::validate_domain(&fqdn).map_err(FirewallError::InvalidRule)?;
+
+        let row = FqdnObjectRow {
+            id: Uuid::new_v4(),
+            name,
+            fqdn,
+            description: description.trim().to_string(),
+            enabled,
+            resolved: Vec::new(),
+            last_resolved_at: None,
+            last_error: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let id = row.id;
+
+        let guard = self.pool.read().expect("firewall pool lock");
+        let Some(pool) = guard.as_ref() else {
+            return Err(FirewallError::Internal("database pool not attached".into()));
+        };
+        let repo = FqdnRepo::new(pool.inner());
+
+        // نام تکراری؟ insert با ON CONFLICT بی‌صدا رد می‌شود — صریح خطا بده
+        if block_on(repo.find_by_name(&row.name))
+            .map_err(|e| FirewallError::Internal(e.to_string()))?
+            .is_some()
+        {
+            return Err(FirewallError::InvalidRule(format!(
+                "fqdn object '{}' already exists",
+                row.name
+            )));
+        }
+        block_on(repo.insert(&row))
+            .map_err(|e| FirewallError::Internal(e.to_string()))?;
+
+        // ۱) setهای (خالی) فوراً ساخته می‌شوند — شیء غیرفعال همین‌جا تمام است
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules after fqdn create failed: {e}");
+        }
+        // ۲) فعال است؟ اولین resolve همین حالا، نه در چرخه بعدی
+        if enabled && fqdn::resolve_all(pool) {
+            if let Err(e) = self.apply_rules() {
+                eprintln!("[firewall] apply_rules after fqdn first resolve failed: {e}");
+            }
+        }
+        Ok(id)
+    }
+
+    pub fn delete_fqdn_object(&self, name: &str) -> FirewallResult<()> {
+        let pool = self.db_or_err()?;
+        block_on(FqdnRepo::new(pool.inner()).delete(name))
+            .map_err(|e| FirewallError::Internal(e.to_string()))?;
+
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules after fqdn delete failed: {e}");
+        }
+        Ok(())
+    }
+
+    pub fn set_fqdn_enabled(&self, name: &str, enabled: bool) -> FirewallResult<()> {
+        let pool = self.db_or_err()?;
+        block_on(FqdnRepo::new(pool.inner()).set_enabled(name, enabled))
+            .map_err(|e| FirewallError::Internal(e.to_string()))?;
+
+        if let Err(e) = self.apply_rules() {
+            eprintln!("[firewall] apply_rules after fqdn toggle failed: {e}");
+        }
+        Ok(())
+    }
+
     /// افزودن گروهی ورودی (IP یا CIDR) به یک لیست. خروجی: تعداد
     /// ورودیِ واقعاً جدید (دوباره‌ها نادیده گرفته می‌شوند).
     pub fn add_set_entries(&self, name: &str, entries: Vec<String>) -> FirewallResult<usize> {
@@ -1103,6 +1199,10 @@ impl FirewallService {
     ///   ۵. قوانین کاربر (به ترتیب priority، هرکدام با counter+comment)
     ///   ۶. حفاظت SYN-flood (فقط input، اگر فعال باشد)
     pub fn apply_rules(&self) -> FirewallResult<()> {
+        // پچ ۴: قفل سری‌سازی — اجراهای همزمان apply_rules (attach در استارت، تیک اول
+        // resolver، API، scheduler) صف می‌شوند؛ وگرنه flush اجرای دوم، قوانین تازه‌ی
+        // اجرای اول را پاک می‌کند و هر دو دوباره add می‌کنند (ریشه‌ی تکرار قوانین).
+        let _apply_guard = self.apply_lock.lock().unwrap_or_else(|e| e.into_inner());
         self.ensure_filter_base()?;
         self.flush_filter_chains()?;
 
@@ -1167,7 +1267,7 @@ impl FirewallService {
         // ۷) قوانین کاربر
         let mut rules = self.registry.list();
         rules.sort_by_key(|r| r.priority);
-        let enabled_count = rules.iter().filter(|r| r.enabled).count();
+        let mut applied_count = 0usize;
 
         // فاز ۴: قوانین زمان‌دار فقط داخل پنجره‌ی زمانی خودشان اعمال
         // می‌شوند (قانون بدون Schedule = همیشه فعال). عبور از مرز پنجره
@@ -1219,97 +1319,189 @@ impl FirewallService {
             let chains = Self::chain_for_direction(&rule.direction);
 
             for chain in chains {
-                let mut args: Vec<String> = vec![
-                    "add".into(),
-                    "rule".into(),
-                    "inet".into(),
-                    "dezh_filter".into(),
-                    (*chain).into(),
-                ];
+                // یک قانون منطقی ممکن است به دو قانون nft تبدیل شود:
+                // nft اجازهٔ ترکیب ip و ip6 را در یک قانون نمی‌دهد
+                // («conflicting network layer protocols specified»)، پس هر
+                // تطبیقِ وابسته به خانواده (fqdn/set/متن IP) به‌ازای هر
+                // خانواده یک قانون جدا می‌سازد — همان الگوی add_set_rule.
 
-                // منبع: شیء دامنه (FQDN) یا Address List یا IP/CIDR متنی
-                // اولویت: fqdn > set > متن
-                if let Some(f) = &rule.source_fqdn {
-                    args.push("ip".into());
-                    args.push("saddr".into());
-                    args.push(format!("@dezh_fqdn_{f}_4"));
-                    args.push("ip6".into());
-                    args.push("saddr".into());
-                    args.push(format!("@dezh_fqdn_{f}_6"));
+                enum Side {
+                    // بدون تطبیقِ خانواده ("any")
+                    Any,
+                    // ارجاع به set (fqdn یا address list): (ref_v4, ref_v6)
+                    Dual(String, String),
+                    // متنِ IP/CIDR؛ Some(true)=v4، Some(false)=v6، None=نامعلوم
+                    Text(String, Option<bool>),
+                }
+
+                let text_family = |s: &str| {
+                    let addr = s.split('/').next().unwrap_or(s).trim();
+                    addr.parse::<std::net::IpAddr>()
+                        .ok()
+                        .map(|a| matches!(a, std::net::IpAddr::V4(_)))
+                };
+
+                let src = if let Some(f) = &rule.source_fqdn {
+                    Side::Dual(format!("@dezh_fqdn_{f}_4"), format!("@dezh_fqdn_{f}_6"))
                 } else if let Some(s) = &rule.source_set {
-                    args.push("ip".into());
-                    args.push("saddr".into());
-                    args.push(format!("@dezh_set_{s}_4"));
-                    args.push("ip6".into());
-                    args.push("saddr".into());
-                    args.push(format!("@dezh_set_{s}_6"));
+                    Side::Dual(format!("@dezh_set_{s}_4"), format!("@dezh_set_{s}_6"))
                 } else if rule.source != "any" {
-                    args.push("ip".into());
-                    args.push("saddr".into());
-                    args.push(rule.source.clone());
-                }
+                    Side::Text(rule.source.clone(), text_family(&rule.source))
+                } else {
+                    Side::Any
+                };
 
-                // مقصد: شیء دامنه (FQDN) یا Address List یا IP/CIDR متنی
-                // اولویت: fqdn > set > متن
-                if let Some(f) = &rule.dest_fqdn {
-                    args.push("ip".into());
-                    args.push("daddr".into());
-                    args.push(format!("@dezh_fqdn_{f}_4"));
-                    args.push("ip6".into());
-                    args.push("daddr".into());
-                    args.push(format!("@dezh_fqdn_{f}_6"));
+                let dst = if let Some(f) = &rule.dest_fqdn {
+                    Side::Dual(format!("@dezh_fqdn_{f}_4"), format!("@dezh_fqdn_{f}_6"))
                 } else if let Some(s) = &rule.dest_set {
-                    args.push("ip".into());
-                    args.push("daddr".into());
-                    args.push(format!("@dezh_set_{s}_4"));
-                    args.push("ip6".into());
-                    args.push("daddr".into());
-                    args.push(format!("@dezh_set_{s}_6"));
+                    Side::Dual(format!("@dezh_set_{s}_4"), format!("@dezh_set_{s}_6"))
                 } else if rule.destination != "any" {
-                    args.push("ip".into());
-                    args.push("daddr".into());
-                    args.push(rule.destination.clone());
-                }
+                    Side::Text(rule.destination.clone(), text_family(&rule.destination))
+                } else {
+                    Side::Any
+                };
 
-                if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
-                    args.push("ip".into());
-                    args.push("protocol".into());
-                    args.push(proto.into());
-                }
-
-                if let Some(port) = rule.port {
-                    if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
-                        if proto == "tcp" || proto == "udp" {
-                            args.push(proto.into());
-                            args.push("dport".into());
-                            args.push(port.to_string());
+                // خانواده‌های مجاز = اشتراک محدودیت‌های طرفین
+                let mut v4_ok = true;
+                let mut v6_ok = true;
+                for side in [&src, &dst] {
+                    if let Side::Text(_, Some(is_v4)) = side {
+                        if *is_v4 {
+                            v6_ok = false;
+                        } else {
+                            v4_ok = false;
                         }
                     }
                 }
+                let any_dual = matches!(&src, Side::Dual(..)) || matches!(&dst, Side::Dual(..));
 
-                // فاز ۳: rate limit اختیاری — بسته‌های مازاد این قانون را
-                // تطبیق نمی‌گیرند (به قانون بعدی / سیاست پیش‌فرض می‌رسند)
-                if let Some(rl) = rule.rate_limit {
-                    args.push("limit".into());
-                    args.push("rate".into());
-                    args.push(format!("{rl}/second"));
+                // (is_v4_variant, is_v6_variant)
+                let plans: Vec<(bool, bool)> = if v4_ok && v6_ok && !any_dual {
+                    vec![(false, false)] // قانون خنثی — هر دو خانواده با یک قانون
+                } else {
+                    let mut p = Vec::new();
+                    if v4_ok {
+                        p.push((true, false));
+                    }
+                    if v6_ok {
+                        p.push((false, true));
+                    }
+                    p
+                };
+
+                for (is_v4, is_v6) in plans {
+                    let mut args: Vec<String> = vec![
+                        "add".into(),
+                        "rule".into(),
+                        "inet".into(),
+                        "dezh_filter".into(),
+                        (*chain).into(),
+                    ];
+
+                    // منبع
+                    match &src {
+                        Side::Dual(r4, r6) => {
+                            if is_v4 {
+                                args.push("ip".into());
+                                args.push("saddr".into());
+                                args.push(r4.clone());
+                            } else {
+                                args.push("ip6".into());
+                                args.push("saddr".into());
+                                args.push(r6.clone());
+                            }
+                        }
+                        Side::Text(t, fam) => {
+                            // خانوادهٔ متنِ IP داخل هر variant از طرح پیروی می‌کند
+                            let v4 = if is_v4 {
+                                true
+                            } else if is_v6 {
+                                false
+                            } else {
+                                fam.unwrap_or(true)
+                            };
+                            args.push(if v4 { "ip".into() } else { "ip6".into() });
+                            args.push("saddr".into());
+                            args.push(t.clone());
+                        }
+                        Side::Any => {}
+                    }
+
+                    // مقصد
+                    match &dst {
+                        Side::Dual(r4, r6) => {
+                            if is_v4 {
+                                args.push("ip".into());
+                                args.push("daddr".into());
+                                args.push(r4.clone());
+                            } else {
+                                args.push("ip6".into());
+                                args.push("daddr".into());
+                                args.push(r6.clone());
+                            }
+                        }
+                        Side::Text(t, fam) => {
+                            let v4 = if is_v4 {
+                                true
+                            } else if is_v6 {
+                                false
+                            } else {
+                                fam.unwrap_or(true)
+                            };
+                            args.push(if v4 { "ip".into() } else { "ip6".into() });
+                            args.push("daddr".into());
+                            args.push(t.clone());
+                        }
+                        Side::Any => {}
+                    }
+
+                    // پروتکل — meta l4proto نسبت به خانواده خنثی است
+                    // (ip protocol فقط IPv4 را می‌گیرد)
+                    if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
+                        args.push("meta".into());
+                        args.push("l4proto".into());
+                        args.push(proto.into());
+                    }
+
+                    if let Some(port) = rule.port {
+                        if let Some(proto) = Self::protocol_to_nft(&rule.protocol) {
+                            if proto == "tcp" || proto == "udp" {
+                                args.push(proto.into());
+                                args.push("dport".into());
+                                args.push(port.to_string());
+                            }
+                        }
+                    }
+
+                    // فاز ۳: rate limit اختیاری — بسته‌های مازاد این قانون را
+                    // تطبیق نمی‌گیرند (به قانون بعدی / سیاست پیش‌فرض می‌رسند)
+                    if let Some(rl) = rule.rate_limit {
+                        args.push("limit".into());
+                        args.push("rate".into());
+                        args.push(format!("{rl}/second"));
+                    }
+
+                    // آمار per-rule + لاگ اختیاری + شناسه برای ردیابی
+                    args.push("counter".into());
+                    if rule.log {
+                        args.push("log".into());
+                        args.push("prefix".into());
+                        // فاز ۳: uuid داخل prefix تا کالکتور kmsg بتواند
+                        // hit را به قانون نگاشت کند (security_events)
+                        args.push(format!("\"dezh:{}: \"", rule.id));
+                    }
+
+                    // verdict قبل از comment — گزارهٔ comment باید
+                    // آخرین گزارهٔ قانون باشد
+                    args.push(verdict.into());
+                    args.push("comment".into());
+                    args.push(format!("\"dezh:{}\"", rule.id));
+
+                    let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+                    Self::run_nft(&args_ref)?;
                 }
-
-                // آمار per-rule + لاگ اختیاری + شناسه برای ردیابی                args.push("counter".into());
-                if rule.log {
-                    args.push("log".into());
-                    args.push("prefix".into());
-                    // فاز ۳: uuid داخل prefix تا کالکتور kmsg بتواند
-                    // hit را به قانون نگاشت کند (security_events)
-                    args.push(format!("\"dezh:{}: \"", rule.id));
-                }
-                args.push("comment".into());
-                args.push(format!("\"dezh:{}\"", rule.id));
-                args.push(verdict.into());
-
-                let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-                Self::run_nft(&args_ref)?;
             }
+            applied_count += 1;
         }
 
         // ۸) حفاظت SYN-flood (فقط زنجیره input)
@@ -1327,7 +1519,7 @@ impl FirewallService {
         }
 
         eprintln!(
-            "[firewall] applied {enabled_count} rule(s), {} address list(s), {} domain object(s), dos={} (syn_rate={})",
+            "[firewall] applied {applied_count} rule(s), {} address list(s), {} domain object(s), dos={} (syn_rate={})",
             sets.len(),
             fqdns.len(),
             settings.dos_protection,
@@ -1498,6 +1690,7 @@ impl Clone for FirewallService {
             registry: Arc::clone(&self.registry),
             pool: Arc::clone(&self.pool),
             zones: Arc::clone(&self.zones),
+            apply_lock: Arc::clone(&self.apply_lock),
         }
     }
 }

@@ -15,7 +15,7 @@ import {
   Ban,
   Clock,
 } from 'lucide-react'
-import { firewallApi, type FirewallRule, type IpSet } from '../api/firewall'
+import { firewallApi, type FirewallRule, type IpSet, type FqdnObject } from '../api/firewall'
 import '../styles/firewall.css'
 
 type Draft = {
@@ -25,8 +25,10 @@ type Draft = {
   enabled: boolean
   log: boolean
   direction: string
+  source_fqdn: string
   source_set: string
   source: string
+  dest_fqdn: string
   dest_set: string
   destination: string
   protocol: string
@@ -73,8 +75,10 @@ function draftFromRule(r: FirewallRule | null): Draft {
     enabled: r?.enabled ?? true,
     log: r?.log ?? false,
     direction: r?.direction ?? 'inbound',
+    source_fqdn: r?.source_fqdn ?? '',
     source_set: r?.source_set ?? '',
     source: r?.source && r.source !== 'any' ? r.source : '',
+    dest_fqdn: r?.dest_fqdn ?? '',
     dest_set: r?.dest_set ?? '',
     destination: r?.destination && r.destination !== 'any' ? r.destination : '',
     protocol: r?.protocol ?? 'any',
@@ -89,10 +93,10 @@ function draftFromRule(r: FirewallRule | null): Draft {
 }
 
 function srcLabel(d: Draft): string {
-  return d.source_set ? `List: ${d.source_set}` : d.source || 'Any'
+  return d.source_fqdn ? `Domain: ${d.source_fqdn}` : d.source_set ? `List: ${d.source_set}` : d.source || 'Any'
 }
 function dstLabel(d: Draft): string {
-  return d.dest_set ? `List: ${d.dest_set}` : d.destination || 'Any'
+  return d.dest_fqdn ? `Domain: ${d.dest_fqdn}` : d.dest_set ? `List: ${d.dest_set}` : d.destination || 'Any'
 }
 function svcLabel(d: Draft): string {
   const p = d.protocol.toUpperCase()
@@ -102,11 +106,13 @@ function svcLabel(d: Draft): string {
 export function RuleModal({
   rule,
   sets,
+  fqdns,
   onClose,
   onSaved,
 }: {
   rule: FirewallRule | null
   sets: IpSet[]
+  fqdns: FqdnObject[]
   onClose: () => void
   onSaved: (msg: string) => void
 }) {
@@ -199,15 +205,17 @@ export function RuleModal({
       action: d.action,
       direction: d.direction,
       protocol: d.protocol,
-      source: d.source_set ? 'any' : d.source || 'any',
-      destination: d.dest_set ? 'any' : d.destination || 'any',
+      source: d.source_set || d.source_fqdn ? 'any' : d.source || 'any',
+      destination: d.dest_set || d.dest_fqdn ? 'any' : d.destination || 'any',
       port: portBody,
       priority: Number(d.priority) || 100,
       description: d.description,
       log: d.log,
       enabled: d.enabled,
-      source_set: d.source_set || null,
-      dest_set: d.dest_set || null,
+      source_set: d.source_fqdn ? null : d.source_set || null,
+      dest_set: d.dest_fqdn ? null : d.dest_set || null,
+      source_fqdn: d.source_fqdn || null,
+      dest_fqdn: d.dest_fqdn || null,
       rate_limit: d.rate ? Number(d.rate) : null,
       // فاز ۴: زمان‌بندی — قرارداد PATCH: هر ۴ فیلد با هم
       schedule_enabled: d.sched_on,
@@ -372,21 +380,38 @@ export function RuleModal({
                 <div className="form-title">Source &amp; Destination</div>
 
                 <div className="form-field">
-                  <label>Source — Address List</label>
+                  <label>Source — FQDN Object</label>
                   <select
                     className="select"
-                    value={d.source_set}
-                    onChange={(e) => set('source_set', e.target.value)}
+                    value={d.source_fqdn}
+                    onChange={(e) => set('source_fqdn', e.target.value)}
                   >
-                    <option value="">— none (use IP/CIDR below) —</option>
-                    {sets.map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name} ({s.kind}) · {s.entries_count} entries
+                    <option value="">— none —</option>
+                    {fqdns.map((f) => (
+                      <option key={f.id} value={f.name}>
+                        {f.name} · {f.fqdn} ({f.resolved.length} IP)
                       </option>
                     ))}
                   </select>
                 </div>
-                {!d.source_set && (
+                {!d.source_fqdn && (
+                  <div className="form-field">
+                    <label>Source — Address List</label>
+                    <select
+                      className="select"
+                      value={d.source_set}
+                      onChange={(e) => set('source_set', e.target.value)}
+                    >
+                      <option value="">— none (use IP/CIDR below) —</option>
+                      {sets.map((s) => (
+                        <option key={s.id} value={s.name}>
+                          {s.name} ({s.kind}) · {s.entries_count} entries
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {!d.source_set && !d.source_fqdn && (
                   <div className="form-field">
                     <label>Source — IP / CIDR</label>
                     <input
@@ -399,21 +424,38 @@ export function RuleModal({
                 )}
 
                 <div className="form-field">
-                  <label>Destination — Address List</label>
+                  <label>Destination — FQDN Object</label>
                   <select
                     className="select"
-                    value={d.dest_set}
-                    onChange={(e) => set('dest_set', e.target.value)}
+                    value={d.dest_fqdn}
+                    onChange={(e) => set('dest_fqdn', e.target.value)}
                   >
-                    <option value="">— none (use IP/CIDR below) —</option>
-                    {sets.map((s) => (
-                      <option key={s.id} value={s.name}>
-                        {s.name} ({s.kind}) · {s.entries_count} entries
+                    <option value="">— none —</option>
+                    {fqdns.map((f) => (
+                      <option key={f.id} value={f.name}>
+                        {f.name} · {f.fqdn} ({f.resolved.length} IP)
                       </option>
                     ))}
                   </select>
                 </div>
-                {!d.dest_set && (
+                {!d.dest_fqdn && (
+                  <div className="form-field">
+                    <label>Destination — Address List</label>
+                    <select
+                      className="select"
+                      value={d.dest_set}
+                      onChange={(e) => set('dest_set', e.target.value)}
+                    >
+                      <option value="">— none (use IP/CIDR below) —</option>
+                      {sets.map((s) => (
+                        <option key={s.id} value={s.name}>
+                          {s.name} ({s.kind}) · {s.entries_count} entries
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {!d.dest_set && !d.dest_fqdn && (
                   <div className="form-field">
                     <label>Destination — IP / CIDR</label>
                     <input
@@ -428,8 +470,9 @@ export function RuleModal({
                 <div className="info-box">
                   <Info size={15} />
                   <span>
-                    Tip: choose an Address List for dynamic groups (blacklist / whitelist), or
-                    type a static IP/CIDR. Leave both empty to match <b>any</b>.
+                    Tip: pick a <b>FQDN Object</b> for domain-based matching (it wins over List and
+                    IP/CIDR), an Address List for dynamic groups, or type a static IP/CIDR. Leave
+                    all empty to match <b>any</b>.
                   </span>
                 </div>
               </>

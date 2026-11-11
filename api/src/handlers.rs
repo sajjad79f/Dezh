@@ -22,7 +22,7 @@ use crate::state::AppState;
 
 use storage::{
     AccountingRepo, AuditRepo, DbPool, IdentityRepo, IpSetRow, NatRuleRow,
-    SessionRepo, UserRepo,
+    SessionRepo, UserRepo,FqdnObjectRow
 };
 use crate::auth::{generate_token, AuthUser};
 use crate::rate_limit::LoginRateLimiter;
@@ -39,7 +39,7 @@ use crate::dto::{
     NetworkInterfaceDto, RemoveSetEntryRequest, RouteDto, RuleStatDto, SetDefaultGatewayRequest,
     SetNetworkZoneRequest, StartSessionRequest, UpdateFirewallRuleRequest,
     UpdateFirewallSettingsRequest, UpdateIdentityRequest, UpdateIpSetRequest, UpdateZoneRequest,
-    UsageQuery, UserDto, ZoneDto,
+    UsageQuery, UserDto, ZoneDto,FqdnObjectDto, CreateFqdnRequest, UpdateFqdnRequest
 };
 
 // ─── تبدیل‌های مشترک (به‌جای تکرار در همه handlerها) ──────
@@ -107,6 +107,8 @@ fn rule_to_dto(r: FirewallRule) -> FirewallRuleDto {
         log: r.log,
         source_set: r.source_set,
         dest_set: r.dest_set,
+        source_fqdn: r.source_fqdn,
+        dest_fqdn: r.dest_fqdn,
         rate_limit: r.rate_limit,
         schedule_enabled,
         schedule_start,
@@ -291,12 +293,16 @@ pub async fn create_firewall_rule(
     // ارجاع به Address List باید واقعاً موجود باشد
     let source_set = validated_set_ref(fw, req.source_set.as_deref(), "source_set")?;
     let dest_set = validated_set_ref(fw, req.dest_set.as_deref(), "dest_set")?;
+    let source_fqdn = validated_fqdn_ref(fw, req.source_fqdn.as_deref(), "source_fqdn")?;
+    let dest_fqdn = validated_fqdn_ref(fw, req.dest_fqdn.as_deref(), "dest_fqdn")?;
 
     let rule = FirewallRule {
         description,
         log: req.log,
         source_set,
         dest_set,
+        source_fqdn,
+        dest_fqdn,
         rate_limit,
         schedule,
         ..FirewallRule::new(&name, action, direction, protocol, &source, &destination, port, priority)
@@ -341,6 +347,44 @@ fn validated_set_ref(
         )));
     }
     Ok(Some(s.to_string()))
+}
+
+/// رشته ارجاع به شیء دامنه را تمیز و اعتبارسنجی می‌کند ("" = حذف ارجاع)
+fn validated_fqdn_ref(
+    fw: &FirewallService,
+    value: Option<&str>,
+    field: &str,
+) -> ApiResult<Option<String>> {
+    let Some(s) = value.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+
+    let exists = fw
+        .list_fqdn_objects()
+        .map(|objs| objs.iter().any(|x| x.name == s))
+        .unwrap_or(false); // اگر DB نیست، سرویس موقع apply نادیده می‌گیرد
+
+    if !exists {
+        return Err(ApiError::bad_request(format!(
+            "{field} '{s}' does not exist (create the FQDN object first)"
+        )));
+    }
+    Ok(Some(s.to_string()))
+}
+
+fn fqdn_to_dto(o: FqdnObjectRow) -> FqdnObjectDto {
+    FqdnObjectDto {
+        id: o.id.to_string(),
+        name: o.name,
+        fqdn: o.fqdn,
+        description: o.description,
+        enabled: o.enabled,
+        resolved: o.resolved,
+        last_resolved_at: o.last_resolved_at.map(|t| t.to_rfc3339()),
+        last_error: o.last_error,
+        created_at: o.created_at.to_rfc3339(),
+        updated_at: o.updated_at.to_rfc3339(),
+    }
 }
 
 /// فاز ۴: ساخت و اعتبارسنجی Schedule — خروجی None یعنی بدون زمان‌بندی
@@ -432,6 +476,8 @@ pub async fn update_firewall_rule(
         && req.port.is_none()
         && req.source_set.is_none()
         && req.dest_set.is_none()
+        && req.source_fqdn.is_none()
+        && req.dest_fqdn.is_none()
         && req.schedule_enabled.is_none()
         && req.schedule_start.is_none()
         && req.schedule_end.is_none()
@@ -493,6 +539,8 @@ pub async fn update_firewall_rule(
     // ارجاع به Address List باید واقعاً موجود باشد ("" یعنی حذف ارجاع)
     let source_set = validated_set_ref(fw, req.source_set.as_deref(), "source_set")?;
     let dest_set = validated_set_ref(fw, req.dest_set.as_deref(), "dest_set")?;
+    let source_fqdn = validated_fqdn_ref(fw, req.source_fqdn.as_deref(), "source_fqdn")?;
+    let dest_fqdn = validated_fqdn_ref(fw, req.dest_fqdn.as_deref(), "dest_fqdn")?;
 
     // ── فاز ۴: زمان‌بندی — قرارداد: هر ۴ فیلد باید با هم فرستاده شوند ──
     // هیچ‌کدام = دست نخوردن؛ هر ۴ با هم = اعمال (false یعنی حذف schedule)
@@ -559,6 +607,12 @@ pub async fn update_firewall_rule(
         }
         if req.dest_set.is_some() {
             r.dest_set = dest_set.clone();
+        }
+        if req.source_fqdn.is_some() {
+            r.source_fqdn = source_fqdn.clone();
+        }
+        if req.dest_fqdn.is_some() {
+            r.dest_fqdn = dest_fqdn.clone();
         }
         // فاز ۴: زمان‌بندی — فقط اگر هر ۴ فیلد با هم آمده باشند
         if let Some(v) = &schedule {
@@ -705,6 +759,80 @@ pub async fn update_ip_set(
         &state,
         None,
         "ipset_updated",
+        Some(&name),
+        serde_json::json!({ "enabled": req.enabled }),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ─── فاز ۵: اشیاء FQDN ─────────────────────────────────────
+
+/// GET /api/firewall/fqdn
+pub async fn list_fqdn_objects(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<Vec<FqdnObjectDto>>> {
+    let fw = state.service::<FirewallService>("firewall")?;
+    Ok(Json(fw.list_fqdn_objects()?.into_iter().map(fqdn_to_dto).collect()))
+}
+
+/// POST /api/firewall/fqdn
+pub async fn create_fqdn_object(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<CreateFqdnRequest>,
+) -> ApiResult<Response> {
+    let description = validation::check_description(&req.description)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+
+    let fw = state.service::<FirewallService>("firewall")?;
+    let id = fw.create_fqdn_object(&req.name, &req.fqdn, &description, req.enabled)?;
+
+    audit(
+        &state,
+        None,
+        "fqdn_object_created",
+        Some(&req.name),
+        serde_json::json!({ "fqdn": req.fqdn }),
+    )
+    .await;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": id.to_string() })),
+    )
+        .into_response())
+}
+
+/// DELETE /api/firewall/fqdn/:name
+pub async fn delete_fqdn_object(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let fw = state.service::<FirewallService>("firewall")?;
+    fw.delete_fqdn_object(&name)?;
+
+    audit(&state, None, "fqdn_object_deleted", Some(&name), serde_json::json!({})).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// PATCH /api/firewall/fqdn/:name — فعال/غیرفعال کردن شیء
+pub async fn update_fqdn_object(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+    Json(req): Json<UpdateFqdnRequest>,
+) -> ApiResult<StatusCode> {
+    let fw = state.service::<FirewallService>("firewall")?;
+    fw.set_fqdn_enabled(&name, req.enabled)?;
+
+    audit(
+        &state,
+        None,
+        "fqdn_object_updated",
         Some(&name),
         serde_json::json!({ "enabled": req.enabled }),
     )
@@ -1919,6 +2047,26 @@ pub async fn delete_zone(
 
 // ─── Network: Interfaces ───────────────────────────────
 
+// ─── Network: Summary (N1) ─────────────────────────────
+
+pub async fn network_summary(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::dto::NetworkSummaryDto>> {
+    let net = state.service::<NetworkService>("network")?;
+    let s = net.summary()?;
+
+    Ok(Json(crate::dto::NetworkSummaryDto {
+        total_interfaces: s.total_interfaces,
+        up_interfaces: s.up_interfaces,
+        down_interfaces: s.down_interfaces,
+        zones: s.zones,
+        rx_bytes: s.rx_bytes,
+        tx_bytes: s.tx_bytes,
+        generated_at: s.generated_at,
+    }))
+}
+
 pub async fn list_network_interfaces(
     _user: AuthUser,
     State(state): State<AppState>,
@@ -1999,5 +2147,236 @@ pub async fn apply_interface_config(
         &description,
     )?;
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+
+// ─── Network: [N1b] Interface Rename ───────────────────────────────
+
+pub async fn rename_interface(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<crate::dto::RenameInterfaceRequest>,
+) -> ApiResult<StatusCode> {
+    // ── اعتبارسنجی (IFNAMSIZ-1 = 15 بایت، کاراکترهای مجاز)
+    let old = validation::check_iface_name(&req.name)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+    let new = validation::check_iface_name(&req.new_name)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+
+    let net = state.service::<NetworkService>("network")?;
+    net.rename_interface(&old, &new)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+
+// ─── Network: [N2] PPPoE ───────────────────────────────
+
+fn pppoe_session_dto(x: network::models::PppoeSession) -> crate::dto::PppoeSessionDto {
+    crate::dto::PppoeSessionDto {
+        iface: x.iface,
+        profile: x.profile,
+        local_ip: x.local_ip,
+        remote_ip: x.remote_ip,
+        up: x.up,
+    }
+}
+
+pub async fn pppoe_state(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::dto::PppoeStateDto>> {
+    let net = state.service::<NetworkService>("network")?;
+    let s = net.pppoe_state()?;
+
+    Ok(Json(crate::dto::PppoeStateDto {
+        profiles: s
+            .profiles
+            .into_iter()
+            .map(|p| crate::dto::PppoeProfileDto {
+                name: p.name,
+                parent_iface: p.parent_iface,
+                username: p.username,
+                mtu: p.mtu,
+                default_route: p.default_route,
+                keepalive: p.keepalive,
+                enabled: p.enabled,
+                description: p.description,
+                session: p.session.map(pppoe_session_dto),
+            })
+            .collect(),
+        sessions: s.sessions.into_iter().map(pppoe_session_dto).collect(),
+    }))
+}
+
+pub async fn pppoe_save(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<crate::dto::PppoeSaveRequest>,
+) -> ApiResult<StatusCode> {
+    // ── اعتبارسنجی سبک (کامل در سرویس)
+    let name = req.name.trim().to_lowercase();
+    if name.is_empty()
+        || name.len() > 32
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(ApiError::bad_request("profile name: 1-32 chars, a-z 0-9 -"));
+    }
+    let parent = validation::check_iface_name(&req.parent_iface)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+    let description = validation::check_description(&req.description)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+
+    let net = state.service::<NetworkService>("network")?;
+    net.pppoe_save(
+        &name,
+        &parent,
+        &req.username,
+        &req.password,
+        req.mtu,
+        req.default_route,
+        req.keepalive,
+        req.enabled,
+        &description,
+    )?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn pppoe_start(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.pppoe_start(&name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn pppoe_stop(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.pppoe_stop(&name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn pppoe_delete(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.pppoe_delete(&name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+
+// ─── Network: [N3] VPN WAN (PPTP / L2TP) ──────────────
+
+fn vpn_connection_dto(x: network::models::VpnConnection) -> crate::dto::VpnConnectionDto {
+    crate::dto::VpnConnectionDto {
+        name: x.name,
+        kind: x.kind,
+        server: x.server,
+        username: x.username,
+        mtu: x.mtu,
+        default_route: x.default_route,
+        keepalive: x.keepalive,
+        enabled: x.enabled,
+        description: x.description,
+        session: x.session.map(pppoe_session_dto),
+    }
+}
+
+pub async fn vpn_state(
+    _user: AuthUser,
+    State(state): State<AppState>,
+) -> ApiResult<Json<crate::dto::VpnWanStateDto>> {
+    let net = state.service::<NetworkService>("network")?;
+    let s = net.vpn_state()?;
+
+    Ok(Json(crate::dto::VpnWanStateDto {
+        connections: s.connections.into_iter().map(vpn_connection_dto).collect(),
+        sessions: s.sessions.into_iter().map(pppoe_session_dto).collect(),
+    }))
+}
+
+pub async fn vpn_save(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Json(req): Json<crate::dto::VpnSaveRequest>,
+) -> ApiResult<StatusCode> {
+    // ── اعتبارسنجی سبک (کامل در سرویس)
+    let name = req.name.trim().to_lowercase();
+    if name.is_empty()
+        || name.len() > 32
+        || !name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(ApiError::bad_request("connection name: 1-32 chars, a-z 0-9 -"));
+    }
+    let kind = req.kind.trim().to_lowercase();
+    if kind != "pptp" && kind != "l2tp" {
+        return Err(ApiError::bad_request("kind must be pptp or l2tp"));
+    }
+    let description = validation::check_description(&req.description)
+        .map_err(ApiError::bad_request)?
+        .to_string();
+
+    let net = state.service::<NetworkService>("network")?;
+    net.vpn_save(
+        &name,
+        &kind,
+        &req.server,
+        &req.username,
+        &req.password,
+        req.mtu,
+        req.default_route,
+        req.keepalive,
+        req.enabled,
+        &description,
+    )?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn vpn_start(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.vpn_start(&name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn vpn_stop(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.vpn_stop(&name)?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+pub async fn vpn_delete(
+    _user: AuthUser,
+    State(state): State<AppState>,
+    Path(name): Path<String>,
+) -> ApiResult<StatusCode> {
+    let net = state.service::<NetworkService>("network")?;
+    net.vpn_delete(&name)?;
     Ok(StatusCode::NO_CONTENT)
 }
